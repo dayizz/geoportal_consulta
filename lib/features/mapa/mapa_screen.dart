@@ -1000,15 +1000,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   String _ubicacionDetectadaLabel(Predio p) {
-    final municipio = (p.municipio ?? '').trim();
-    if (municipio.isNotEmpty && !_isGestionStatusLabel(municipio)) {
-      return municipio;
+    final estado = (p.estado ?? '').trim();
+    if (estado.isNotEmpty) {
+      return estado;
     }
 
-    final ejido = (p.ejido ?? '').trim();
-    if (ejido.isNotEmpty && !_isGestionStatusLabel(ejido)) return ejido;
-
-    return 'Sin ubicacion';
+    return 'Sin estado';
   }
 
   bool _isGestionStatusLabel(String value) {

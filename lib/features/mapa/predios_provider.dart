@@ -52,9 +52,10 @@ class GeoJsonPredioFeature {
 
 class _MunicipioLookup {
   final String nombre;
+  final String? estado;
   final List<List<LatLng>> polygons;
 
-  const _MunicipioLookup({required this.nombre, required this.polygons});
+  const _MunicipioLookup({required this.nombre, required this.polygons, this.estado});
 }
 
 String? _inferProyecto(Predio predio) {
@@ -168,8 +169,16 @@ Future<List<_MunicipioLookup>> _loadMunicipioLookup() async {
           final geometry = Map<String, dynamic>.from(
             (feature['geometry'] as Map?) ?? const <String, dynamic>{},
           );
+          final estado = (props['estado'] ??
+                  props['ESTADO'] ??
+                  props['entidad'] ??
+                  props['ENTIDAD'] ??
+                  '')
+              .toString()
+              .trim();
           return _MunicipioLookup(
             nombre: nombre,
+            estado: estado.isEmpty ? null : estado,
             polygons: _extractPolygons(geometry)
                 .where((ring) => ring.length >= 3)
                 .toList(),
@@ -205,6 +214,29 @@ String? _detectMunicipioFromGeometry(
   return null;
 }
 
+String? _detectEstadoFromGeometry(
+  Map<String, dynamic>? geometry,
+  List<_MunicipioLookup> municipios,
+) {
+  if (geometry == null || municipios.isEmpty) return null;
+
+  final polygons = _extractPolygons(geometry)
+      .where((ring) => ring.length >= 3)
+      .toList();
+  if (polygons.isEmpty) return null;
+
+  final center = _centroid(polygons.first);
+  for (final municipio in municipios) {
+    for (final ring in municipio.polygons) {
+      if (_pointInPolygon(center, ring)) {
+        return municipio.estado;
+      }
+    }
+  }
+
+  return null;
+}
+
 Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
   try {
     final raw = await rootBundle.loadString('assets/data/TSNL-131617.geojson');
@@ -231,6 +263,7 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
           (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
         final municipioDetectado =
           _detectMunicipioFromGeometry(geometry, municipiosLookup);
+      final estadoDetectado = _detectEstadoFromGeometry(geometry, municipiosLookup);
       allPredios.add(
         Predio.fromMap({
           'id': (props['ID'] ?? props['id'] ?? allPredios.length).toString(),
@@ -241,6 +274,7 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
           'tipo_propiedad': 'PRIVADA',
           'proyecto': (featureProject.isEmpty ? requestedProject : featureProject),
           'municipio': municipioDetectado,
+          'estado': estadoDetectado,
           'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
           'geometry': geometry,
           'created_at': DateTime.now().toIso8601String(),

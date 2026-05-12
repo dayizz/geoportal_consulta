@@ -7,6 +7,7 @@ class Predio {
   final String tramo;
   final String tipoPropiedad;
   final String? municipio;
+  final String? estado;
   final String? clasificacionAfectacion;
   final String? ejido;
   final double? kmInicio;
@@ -31,6 +32,7 @@ class Predio {
     required this.tramo,
     required this.tipoPropiedad,
     this.municipio,
+    this.estado,
     this.clasificacionAfectacion,
     this.ejido,
     this.kmInicio,
@@ -102,7 +104,8 @@ class Predio {
           'T1',
       tipoPropiedad: map['tipo_propiedad'] as String? ?? 'PRIVADA',
         municipio: (map['municipio'] ?? map['MUNICIPIO'])?.toString(),
-        clasificacionAfectacion:
+      estado: (map['estado'] ?? map['ESTADO'])?.toString(),
+      clasificacionAfectacion:
           (map['clasificacion'] ??
               map['CLASIFICACION'] ??
               map['tipo_afectacion'] ??
