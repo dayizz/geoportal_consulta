@@ -165,7 +165,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               proyecto,
               prediosAsync.valueOrNull ?? [],
               municipiosAsync.valueOrNull ?? const [],
-              importedGeoJsonAsync.valueOrNull?.length ?? 0,
             ),
           ),
 
@@ -629,7 +628,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     String proyecto,
     List<Predio> predios,
     List<MunicipioLimite> municipios,
-    int importedGeoJsonCount,
   ) {
     final liberacionFiltered = _applyLiberacionFilter(predios);
     final filteredPredios = _applyAllFilters(predios);
@@ -708,45 +706,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${filteredPredios.length} predios',
-                    style: GoogleFonts.inter(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                if (importedGeoJsonCount > 0) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD32F2F).withOpacity(0.25),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.35),
-                        width: 1,
-                      ),
-                    ),
-                    child: Text(
-                      'GeoJSON: $importedGeoJsonCount',
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
                 const Spacer(),
                 _ColorModeToggle(
                   mode: _colorMode,
