@@ -9,9 +9,9 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../auth/auth_provider.dart';
-final color = estatus == 'liberado'
-    ? const Color(0xFF2E7D32)
-    : const Color(0xFFD32F2F);    if (estatus == 'liberado') return const Color(0xFF2E7D32); // verde
+import 'predio_model.dart';
+import 'predios_provider.dart';
+
 // Colores por estado de gestión
 Color _colorEstado(Predio p) {
   final estatus = p.estatus?.trim().toLowerCase();
