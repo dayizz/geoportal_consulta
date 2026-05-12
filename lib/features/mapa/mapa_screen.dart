@@ -380,6 +380,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
+        // Capa adicional de etiquetas para modo satelital
+        if (_baseLayer == _BaseLayer.satelital)
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'mx.sao.geoportal_consulta',
+            maxZoom: 19,
+            opacity: 0.3, // Transparencia para que se vean las imágenes satelitales debajo
+            tileProvider: const NetworkTileProvider(),
+          ),
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
         if (municipalPolygons.isNotEmpty) PolygonLayer(polygons: municipalPolygons),
