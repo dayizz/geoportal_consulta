@@ -386,7 +386,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 19,
-            opacity: 0.3, // Transparencia para que se vean las imágenes satelitales debajo
           ),
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
