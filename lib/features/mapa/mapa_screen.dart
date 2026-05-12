@@ -627,7 +627,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       liberacionFiltered,
       (p) => _ubicacionDetectadaLabel(p),
       emptyLabel: 'Sin ubicacion',
-    );
+    )..removeWhere((key, _) => _isGestionStatusLabel(key));
     final estatusCounts = <String, int>{
       'Todos': predios.length,
       'Liberados': predios.where(_isLiberado).length,
@@ -1001,12 +1001,19 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   String _ubicacionDetectadaLabel(Predio p) {
     final municipio = (p.municipio ?? '').trim();
-    if (municipio.isNotEmpty) return municipio;
+    if (municipio.isNotEmpty && !_isGestionStatusLabel(municipio)) {
+      return municipio;
+    }
 
     final ejido = (p.ejido ?? '').trim();
-    if (ejido.isNotEmpty) return ejido;
+    if (ejido.isNotEmpty && !_isGestionStatusLabel(ejido)) return ejido;
 
     return 'Sin ubicacion';
+  }
+
+  bool _isGestionStatusLabel(String value) {
+    final normalized = _normalizedStatus(value);
+    return normalized == 'liberado' || normalized == 'no_liberado';
   }
 
   String _liberacionFilterLabel(_LiberacionFilter filter) {
