@@ -391,7 +391,7 @@ final prediosConsultaProvider =
       final uri = Uri.parse('$_backendBaseUrl/predios').replace(
         queryParameters: {'proyecto': proyecto},
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 3));
+      final response = await http.get(uri).timeout(const Duration(seconds: 2));
       if (response.statusCode != 200) {
         return _loadPrediosFromAssetGeoJson(proyecto);
       }
@@ -409,7 +409,7 @@ final prediosConsultaProvider =
       // recuperar todo y filtrar en cliente usando inferencia de proyecto.
       final fallbackResponse =
           await http.get(Uri.parse('$_backendBaseUrl/predios')).timeout(
-                const Duration(seconds: 3),
+                const Duration(seconds: 2),
               );
       if (fallbackResponse.statusCode != 200) {
         return _loadPrediosFromAssetGeoJson(proyecto);
@@ -449,7 +449,7 @@ final municipiosLimitesProvider =
   try {
     final response = await http
         .get(Uri.parse('$_backendBaseUrl/municipios'))
-        .timeout(const Duration(seconds: 3));
+        .timeout(const Duration(seconds: 2));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       if (data is List) {

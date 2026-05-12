@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../auth/auth_provider.dart';
+import 'optimization_utils.dart';
 import 'predio_model.dart';
 import 'predios_provider.dart';
 
@@ -84,12 +85,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   late AnimationController _spinCtrl;
   double _currentZoom = _defaultZoom;
 
+  // Caches para optimización
+  late GeometryCache _geometryCache;
+  late SpatialIndex _spatialIndex;
+  late MemoizedCache<String, LatLng> _centroidCache;
+
   static const _defaultCenter = LatLng(20.72, -100.35);
   static const _defaultZoom = 10.0;
 
   @override
   void initState() {
     super.initState();
+    _geometryCache = GeometryCache();
+    _spatialIndex = SpatialIndex();
+    _centroidCache = MemoizedCache<String, LatLng>();
     _spinCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -100,6 +109,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   @override
   void dispose() {
     _spinCtrl.dispose();
+    _geometryCache.clear();
+    _spatialIndex.clear();
+    _centroidCache.clear();
     super.dispose();
   }
 
@@ -213,6 +225,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     // Mostrar polígonos desde el zoom inicial para evitar mapa sin geometrías visibles.
     bool shouldDrawPolygons() => _currentZoom >= 10;
+    // Renderizado selectivo de features importadas por zoom
+    bool shouldDrawImportedDetail() => _currentZoom >= 12;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -274,27 +288,29 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    for (final feature in importedGeoJsonPredios) {
-      final rings = _extractPolygons(feature.geometry);
-      final lines = _extractPolylines(feature.geometry);
-      final estatus = feature.estatus?.trim().toLowerCase();
-      final color = feature.esEnvolvente
-          ? const Color(0xFF1976D2)
-          : (estatus == 'liberado'
-              ? const Color(0xFFCDDC39)
-              : const Color(0xFFD32F2F));
+    // Renderizar features importadas solo si zoom lo justifica
+    if (shouldDrawImportedDetail()) {
+      for (final feature in importedGeoJsonPredios) {
+        final rings = _extractPolygons(feature.geometry);
+        final lines = _extractPolylines(feature.geometry);
+        final estatus = feature.estatus?.trim().toLowerCase();
+        final color = feature.esEnvolvente
+            ? const Color(0xFF1976D2)
+            : (estatus == 'liberado'
+                ? const Color(0xFFCDDC39)
+                : const Color(0xFFD32F2F));
 
-      for (final ring in rings) {
-        if (ring.length < 3) continue;
-        importedPolygons.add(
-          Polygon(
-            points: ring,
-            color: color.withOpacity(0.35),
-            borderColor: color.withOpacity(0.95),
-            borderStrokeWidth: 3.2,
-          ),
-        );
-      }
+        for (final ring in rings) {
+          if (ring.length < 3) continue;
+          importedPolygons.add(
+            Polygon(
+              points: ring,
+              color: color.withOpacity(0.35),
+              borderColor: color.withOpacity(0.95),
+              borderStrokeWidth: 3.2,
+            ),
+          );
+        }
 
       for (final line in lines) {
         if (line.length < 2) continue;
@@ -305,6 +321,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             color: color.withOpacity(0.9),
           ),
         );
+      }
       }
     }
 
