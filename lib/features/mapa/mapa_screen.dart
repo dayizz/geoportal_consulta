@@ -15,10 +15,10 @@ final color = estatus == 'liberado'
 // Colores por estado de gestión
 Color _colorEstado(Predio p) {
   final estatus = p.estatus?.trim().toLowerCase();
-  if (estatus == 'liberado') return const Color(0xFF66BB6A); // verde claro
+  if (estatus == 'liberado') return const Color(0xFFCDDC39); // verde lima
   if (estatus == 'no liberado') return const Color(0xFFD32F2F); // rojo
   if (p.negociacion) return const Color(0xFF1B5E20); // verde oscuro
-  if (p.cop) return const Color(0xFF66BB6A); // verde claro
+  if (p.cop) return const Color(0xFFCDDC39); // verde lima
   if (p.levantamiento) return const Color(0xFFF57F17); // ámbar
   if (p.identificacion) return const Color(0xFF1565C0); // azul
   return const Color(0xFF757575); // gris
@@ -276,8 +276,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
       final rings = _extractPolygons(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
-        final color = estatus == 'liberado'
-          ? const Color(0xFF66BB6A)
+          final color = estatus == 'liberado'
+            ? const Color(0xFFCDDC39)
           : const Color(0xFFD32F2F);
 
       for (final ring in rings) {
