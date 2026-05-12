@@ -71,6 +71,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   final MapController _mapCtrl = MapController();
   Predio? _selectedPredio;
   String? _selectedMunicipio;
+  String? _selectedEstadoGestion;
   _ColorMode _colorMode = _ColorMode.estado;
   _LiberacionFilter _liberacionFilter = _LiberacionFilter.todos;
   _BaseLayer _baseLayer = _BaseLayer.satelital;
@@ -153,28 +154,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               prediosAsync.valueOrNull ?? [],
               municipiosAsync.valueOrNull ?? const [],
               importedGeoJsonAsync.valueOrNull?.length ?? 0,
-            ),
-          ),
-
-          // ─── Etiqueta de capa activa ───────────────────────────────────
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.55),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                _baseLayer == _BaseLayer.estandar ? 'Estandar' : 'Satelital',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  letterSpacing: 1.1,
-                ),
-              ),
             ),
           ),
 
@@ -380,11 +359,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
-        // Capa adicional de etiquetas para modo satelital
+        // Etiquetas transparentes sobre satelital (calles, colonias, municipios, etc.)
         if (_baseLayer == _BaseLayer.satelital)
           TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            urlTemplate:
+                'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
+            subdomains: const ['a', 'b', 'c', 'd'],
             maxZoom: 19,
           ),
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
@@ -642,6 +623,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       (p) => _extractSegmentNumber(p.tramo),
       emptyLabel: 'Sin segmento',
     );
+    final estadoGestionCounts = _countByField(
+      liberacionFiltered,
+      (p) => _estadoGestionLabel(p.estatus),
+      emptyLabel: 'Sin estatus',
+    );
     final estatusCounts = <String, int>{
       'Todos': predios.length,
       'Liberados': predios.where(_isLiberado).length,
@@ -809,6 +795,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     clasificaCounts,
                     segmentoCounts,
                     estatusCounts,
+                    estadoGestionCounts,
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
@@ -822,6 +809,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   label: Text(
                     _segmentoQuery.isEmpty &&
                             _selectedMunicipio == null &&
+                            _selectedEstadoGestion == null &&
                             _liberacionFilter == _LiberacionFilter.todos
                         ? 'Filtros avanzados'
                         : 'Filtros avanzados *',
@@ -845,6 +833,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     Map<String, int> clasificaCounts,
     Map<String, int> segmentoCounts,
     Map<String, int> estatusCounts,
+    Map<String, int> estadoGestionCounts,
   ) async {
     await showGeneralDialog<void>(
       context: context,
@@ -938,6 +927,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     ),
                     const SizedBox(height: 12),
                     _countSection(
+                      title: 'Estado detectado',
+                      counts: estadoGestionCounts,
+                      selectedLabel: _selectedEstadoGestion,
+                      onChipTap: (estado) {
+                        setState(() {
+                          if (_selectedEstadoGestion == estado) {
+                            _selectedEstadoGestion = null;
+                          } else {
+                            _selectedEstadoGestion = estado;
+                          }
+                          _selectedPredio = null;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _countSection(
                       title: 'Clasificación',
                       counts: clasificaCounts,
                     ),
@@ -950,6 +955,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                               _liberacionFilter = _LiberacionFilter.todos;
                               _segmentoQuery = '';
                               _selectedMunicipio = null;
+                              _selectedEstadoGestion = null;
                               _selectedPredio = null;
                               _lastFocusedMunicipioKey = null;
                             }),
@@ -991,6 +997,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         );
       },
     );
+  }
+
+  String _estadoGestionLabel(String? rawStatus) {
+    final value = (rawStatus ?? '').trim();
+    if (value.isEmpty) return 'Sin estatus';
+    final lower = value.toLowerCase();
+    return lower[0].toUpperCase() + lower.substring(1);
   }
 
   String _liberacionFilterLabel(_LiberacionFilter filter) {
@@ -1421,10 +1434,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       return _normalizeMunicipioName(value) == selectedKey;
     }).toList();
 
-    final query = _extractSegmentNumber(_segmentoQuery);
-    if (query.isEmpty) return withMunicipio;
+    final estadoSeleccionado = _selectedEstadoGestion;
+    final withEstado = estadoSeleccionado == null
+        ? withMunicipio
+        : withMunicipio.where((p) {
+            final estado = _estadoGestionLabel(p.estatus);
+            return estado == estadoSeleccionado;
+          }).toList();
 
-    return withMunicipio.where((p) {
+    final query = _extractSegmentNumber(_segmentoQuery);
+    if (query.isEmpty) return withEstado;
+
+    return withEstado.where((p) {
       final segmento = _extractSegmentNumber(p.tramo);
       return segmento == query;
     }).toList();
