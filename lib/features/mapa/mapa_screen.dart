@@ -214,9 +214,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     bool shouldDrawPolygons() => _currentZoom >= 10;
 
     for (final p in filteredPredios) {
-      final color = _colorMode == _ColorMode.estado
-          ? _colorEstado(p)
-          : _colorTipo(p);
+        final estatus = p.estatus?.trim().toLowerCase();
+        final color = (estatus == 'liberado')
+          ? const Color(0xFFCDDC39)
+          : (_colorMode == _ColorMode.estado
+            ? _colorEstado(p)
+            : _colorTipo(p));
 
       final geo = p.geometry;
       LatLng? markerPoint;
@@ -228,8 +231,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             if (coords.isNotEmpty) {
               polygons.add(Polygon(
                 points: coords,
-                color: color.withOpacity(0.28),
-                borderColor: color.withOpacity(0.98),
+                color: color.withOpacity(0.35),
+                borderColor: color.withOpacity(0.95),
                 borderStrokeWidth: 3.6,
               ));
             }
