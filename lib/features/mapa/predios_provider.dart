@@ -324,7 +324,7 @@ String? _detectEstadoFromGeometry(
 
 Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
   try {
-    final raw = await rootBundle.loadString('assets/data/TSNL-131617.geojson');
+    final raw = await rootBundle.loadString('assets/data/TSNL_16_17.geojson');
     final decoded = jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) return const [];
 
@@ -506,22 +506,37 @@ final municipiosLimitesProvider =
 final importedGeoJsonPrediosProvider =
     FutureProvider.autoDispose<List<GeoJsonPredioFeature>>((ref) async {
   try {
-    final raw = await rootBundle.loadString('assets/data/TSNL-131617.geojson');
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) return const [];
+    Future<List<Map<String, dynamic>>> readFeatures(String assetPath) async {
+      final raw = await rootBundle.loadString(assetPath);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final features = decoded['features'];
+      if (features is! List) return const [];
+      return features
+          .whereType<Map>()
+          .map((f) => Map<String, dynamic>.from(f))
+          .toList();
+    }
 
-    final features = decoded['features'];
-    if (features is! List) return const [];
+    final prediosFeatures = await readFeatures('assets/data/TSNL_16_17.geojson');
+    final envolventesPoligono =
+        await readFeatures('assets/data/ENVOLVENTES_P_TSNL.geojson');
+    final envolventesLinea =
+        await readFeatures('assets/data/ENVOLVENTES_L_TSNL.geojson');
 
-    return features
-        .whereType<Map>()
-        .map((f) => Map<String, dynamic>.from(f))
+    final mergedFeatures = [
+      ...prediosFeatures,
+      ...envolventesPoligono,
+      ...envolventesLinea,
+    ];
+
+    return mergedFeatures
         .map((feature) {
           final props = Map<String, dynamic>.from(
             (feature['properties'] as Map?) ?? const <String, dynamic>{},
           );
           return GeoJsonPredioFeature(
-            id: (props['ID'] ?? feature['id'] ?? '').toString(),
+            id: (props['ID'] ?? props['fid'] ?? feature['id'] ?? '').toString(),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
             geometry: Map<String, dynamic>.from(
               (feature['geometry'] as Map?) ?? const <String, dynamic>{},

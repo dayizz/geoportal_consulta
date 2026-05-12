@@ -201,10 +201,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) {
     _ensureImportedGeoJsonFocus(importedGeoJsonPredios);
     final filteredPredios = _applyAllFilters(predios);
-    final visiblePredioIds = filteredPredios.map((p) => p.id).toSet();
     _ensureInitialFocus(predios, importedGeoJsonPredios);
     final polygons = <Polygon>[];
     final importedPolygons = <Polygon>[];
+    final importedPolylines = <Polyline>[];
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
     final markers = <Marker>[];
@@ -275,10 +275,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     }
 
     for (final feature in importedGeoJsonPredios) {
-      if (predios.isNotEmpty && !visiblePredioIds.contains(feature.id)) {
-        continue;
-      }
       final rings = _extractPolygons(feature.geometry);
+      final lines = _extractPolylines(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
           final color = estatus == 'liberado'
             ? const Color(0xFFCDDC39)
@@ -292,6 +290,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             color: color.withOpacity(0.35),
             borderColor: color.withOpacity(0.95),
             borderStrokeWidth: 3.2,
+          ),
+        );
+      }
+
+      for (final line in lines) {
+        if (line.length < 2) continue;
+        importedPolylines.add(
+          Polyline(
+            points: line,
+            strokeWidth: 2.4,
+            color: color.withOpacity(0.9),
           ),
         );
       }
@@ -369,6 +378,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             maxZoom: 19,
           ),
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
+        if (importedPolylines.isNotEmpty)
+          PolylineLayer(polylines: importedPolylines),
         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
         if (municipalPolygons.isNotEmpty) PolygonLayer(polygons: municipalPolygons),
         if (municipalPolylines.isNotEmpty)
@@ -1398,6 +1409,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return [];
   }
 
+  List<List<LatLng>> _extractPolylines(Map<String, dynamic> geo) {
+    final type = geo['type'] as String?;
+    if (type == 'LineString') {
+      final coords = geo['coordinates'] as List?;
+      if (coords == null || coords.isEmpty) return [];
+      return [_toLatLngs(coords)];
+    } else if (type == 'MultiLineString') {
+      final multiCoords = geo['coordinates'] as List?;
+      if (multiCoords == null) return [];
+      return multiCoords.map((line) => _toLatLngs(line as List)).toList();
+    }
+    return [];
+  }
+
   List<LatLng> _toLatLngs(List raw) {
     return raw.map((c) {
       final coord = c as List;
@@ -1578,6 +1603,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final polys = _extractPolygons(feature.geometry);
       if (polys.isNotEmpty && polys.first.isNotEmpty) {
         points.add(_centroid(polys.first));
+        continue;
+      }
+      final lines = _extractPolylines(feature.geometry);
+      if (lines.isNotEmpty && lines.first.isNotEmpty) {
+        points.add(_centroid(lines.first));
       }
     }
     return points;
@@ -1639,6 +1669,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       for (final ring in polys) {
         if (ring.length < 3) continue;
         points.addAll(ring);
+      }
+      final lines = _extractPolylines(feature.geometry);
+      for (final line in lines) {
+        if (line.length < 2) continue;
+        points.addAll(line);
       }
     }
     return points;
