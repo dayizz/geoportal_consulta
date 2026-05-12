@@ -41,12 +41,14 @@ class MunicipioLimite {
 class GeoJsonPredioFeature {
   final String id;
   final String? estatus;
+  final bool esEnvolvente;
   final Map<String, dynamic> geometry;
 
   const GeoJsonPredioFeature({
     required this.id,
     required this.geometry,
     this.estatus,
+    this.esEnvolvente = false,
   });
 }
 
@@ -515,6 +517,10 @@ final importedGeoJsonPrediosProvider =
       return features
           .whereType<Map>()
           .map((f) => Map<String, dynamic>.from(f))
+          .map((f) => {
+                ...f,
+                '__source_asset': assetPath,
+              })
           .toList();
     }
 
@@ -535,9 +541,15 @@ final importedGeoJsonPrediosProvider =
           final props = Map<String, dynamic>.from(
             (feature['properties'] as Map?) ?? const <String, dynamic>{},
           );
+          final sourceAsset = (feature['__source_asset'] ?? '').toString().toLowerCase();
+          final hasEnvolventeSource = sourceAsset.contains('envolvente');
+          final hasEnvolventeProp = props.values.any(
+            (value) => value.toString().toLowerCase().contains('envolvente'),
+          );
           return GeoJsonPredioFeature(
             id: (props['ID'] ?? props['fid'] ?? feature['id'] ?? '').toString(),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
+            esEnvolvente: hasEnvolventeSource || hasEnvolventeProp,
             geometry: Map<String, dynamic>.from(
               (feature['geometry'] as Map?) ?? const <String, dynamic>{},
             ),

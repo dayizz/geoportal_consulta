@@ -278,9 +278,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
-          final color = estatus == 'liberado'
-            ? const Color(0xFFCDDC39)
-          : const Color(0xFFD32F2F);
+      final color = feature.esEnvolvente
+          ? const Color(0xFF1976D2)
+          : (estatus == 'liberado'
+              ? const Color(0xFFCDDC39)
+              : const Color(0xFFD32F2F));
 
       for (final ring in rings) {
         if (ring.length < 3) continue;
