@@ -80,6 +80,89 @@ String? _inferProyecto(Predio predio) {
   return null;
 }
 
+/// Mapeo de municipios a estados territoriales de México
+String? _getEstadoFromMunicipio(String? municipio) {
+  if (municipio == null || municipio.isEmpty) return null;
+  
+  final nom = municipio.trim().toLowerCase();
+  
+  // Mapa de municipio → estado
+  const municipioToEstado = {
+    // Nuevo León
+    'monterrey': 'Nuevo León',
+    'guadalupe': 'Nuevo León',
+    'apodaca': 'Nuevo León',
+    'santa catarina': 'Nuevo León',
+    'san nicolás de los garza': 'Nuevo León',
+    'san pedro garza garcía': 'Nuevo León',
+    'escobedo': 'Nuevo León',
+    'garcía': 'Nuevo León',
+    'general escobedo': 'Nuevo León',
+    'general zuazua': 'Nuevo León',
+    'general terán': 'Nuevo León',
+    'general treviño': 'Nuevo León',
+    'ciénega de flores': 'Nuevo León',
+    'cadereyta jiménez': 'Nuevo León',
+    'cerralvo': 'Nuevo León',
+    'doctor gonzález': 'Nuevo León',
+    'hidalgo': 'Nuevo León',
+    'higueras': 'Nuevo León',
+    'hualahuises': 'Nuevo León',
+    'iturbide': 'Nuevo León',
+    'lampazos de naranjo': 'Nuevo León',
+    'linares': 'Nuevo León',
+    'marín': 'Nuevo León',
+    'melchor ocampo': 'Nuevo León',
+    'mina': 'Nuevo León',
+    'montemorelos': 'Nuevo León',
+    'pesquería': 'Nuevo León',
+    'rayones': 'Nuevo León',
+    'salinas victoria': 'Nuevo León',
+    'san buenaventura': 'Nuevo León',
+    'santiago': 'Nuevo León',
+    'vallecillo': 'Nuevo León',
+    'villaldama': 'Nuevo León',
+    'agualeguas': 'Nuevo León',
+    'allende': 'Nuevo León',
+    'anáhuac': 'Nuevo León',
+    'bustamante': 'Nuevo León',
+    'los ramones': 'Nuevo León',
+    'mainero': 'Nuevo León',
+    'progreso': 'Nuevo León',
+    'sabinas hidalgo': 'Nuevo León',
+    'villagrán': 'Nuevo León',
+    
+    // Coahuila
+    'saltillo': 'Coahuila',
+    'arteaga': 'Coahuila',
+    'ramos arizpe': 'Coahuila',
+    'monclova': 'Coahuila',
+    'abasolo': 'Coahuila',
+    'castaños': 'Coahuila',
+    'candela': 'Coahuila',
+    'concepción del oro': 'Coahuila',
+    'cuatro ciénegas': 'Coahuila',
+    'el carmen': 'Coahuila',
+    'el salvador': 'Coahuila',
+    'frontera': 'Coahuila',
+    'galeana': 'Coahuila',
+    'general cepeda': 'Coahuila',
+    'guerrero': 'Coahuila',
+    'juárez': 'Coahuila',
+    'lamadrid': 'Coahuila',
+    'mazapil': 'Coahuila',
+    'nadadores': 'Coahuila',
+    'parras': 'Coahuila',
+    'parás': 'Coahuila',
+    'sacramento': 'Coahuila',
+    
+    // Tamaulipas
+    'nuevo laredo': 'Tamaulipas',
+  };
+  
+  return municipioToEstado[nom];
+}
+
 List<LatLng> _toLatLngs(List raw) {
   return raw
       .whereType<List>()
@@ -176,9 +259,11 @@ Future<List<_MunicipioLookup>> _loadMunicipioLookup() async {
                   '')
               .toString()
               .trim();
+          // Si no hay estado en geojson, usar mapeo municipio→estado
+          final estadoFinal = estado.isEmpty ? _getEstadoFromMunicipio(nombre) : estado;
           return _MunicipioLookup(
             nombre: nombre,
-            estado: estado.isEmpty ? null : estado,
+            estado: estadoFinal,
             polygons: _extractPolygons(geometry)
                 .where((ring) => ring.length >= 3)
                 .toList(),
