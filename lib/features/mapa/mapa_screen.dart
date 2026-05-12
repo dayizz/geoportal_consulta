@@ -625,8 +625,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
     final estadoGestionCounts = _countByField(
       liberacionFiltered,
-      (p) => _estadoGestionLabel(p.estatus),
-      emptyLabel: 'Sin estatus',
+      (p) => _ubicacionDetectadaLabel(p),
+      emptyLabel: 'Sin ubicacion',
     );
     final estatusCounts = <String, int>{
       'Todos': predios.length,
@@ -927,7 +927,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     ),
                     const SizedBox(height: 12),
                     _countSection(
-                      title: 'Estado detectado',
+                      title: 'Estado/ubicacion detectada',
                       counts: estadoGestionCounts,
                       selectedLabel: _selectedEstadoGestion,
                       onChipTap: (estado) {
@@ -999,11 +999,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
 
-  String _estadoGestionLabel(String? rawStatus) {
-    final value = (rawStatus ?? '').trim();
-    if (value.isEmpty) return 'Sin estatus';
-    final lower = value.toLowerCase();
-    return lower[0].toUpperCase() + lower.substring(1);
+  String _ubicacionDetectadaLabel(Predio p) {
+    final municipio = (p.municipio ?? '').trim();
+    if (municipio.isNotEmpty) return municipio;
+
+    final ejido = (p.ejido ?? '').trim();
+    if (ejido.isNotEmpty) return ejido;
+
+    return 'Sin ubicacion';
   }
 
   String _liberacionFilterLabel(_LiberacionFilter filter) {
@@ -1438,7 +1441,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final withEstado = estadoSeleccionado == null
         ? withMunicipio
         : withMunicipio.where((p) {
-            final estado = _estadoGestionLabel(p.estatus);
+            final estado = _ubicacionDetectadaLabel(p);
             return estado == estadoSeleccionado;
           }).toList();
 
