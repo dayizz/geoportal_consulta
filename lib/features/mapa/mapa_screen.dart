@@ -156,6 +156,28 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             ),
           ),
 
+          // ─── Etiqueta de capa activa ───────────────────────────────────
+          Positioned(
+            top: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _baseLayer == _BaseLayer.estandar ? 'Estandar' : 'Satelital',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ),
+          ),
+
           // ─── Panel de detalle ────────────────────────────────────────────
           if (_selectedPredio != null)
             Positioned(
