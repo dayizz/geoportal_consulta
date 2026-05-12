@@ -9,16 +9,16 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../auth/auth_provider.dart';
-import 'predio_model.dart';
-import 'predios_provider.dart';
-
+final color = estatus == 'liberado'
+    ? const Color(0xFF2E7D32)
+    : const Color(0xFFD32F2F);    if (estatus == 'liberado') return const Color(0xFF2E7D32); // verde
 // Colores por estado de gestión
 Color _colorEstado(Predio p) {
   final estatus = p.estatus?.trim().toLowerCase();
-  if (estatus == 'liberado') return const Color(0xFF2E7D32); // verde
+  if (estatus == 'liberado') return const Color(0xFF66BB6A); // verde claro
   if (estatus == 'no liberado') return const Color(0xFFD32F2F); // rojo
   if (p.negociacion) return const Color(0xFF1B5E20); // verde oscuro
-  if (p.cop) return const Color(0xFF2E7D32); // verde
+  if (p.cop) return const Color(0xFF66BB6A); // verde claro
   if (p.levantamiento) return const Color(0xFFF57F17); // ámbar
   if (p.identificacion) return const Color(0xFF1565C0); // azul
   return const Color(0xFF757575); // gris
@@ -276,8 +276,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
       final rings = _extractPolygons(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
-      final color = estatus == 'liberado'
-          ? const Color(0xFF2E7D32)
+        final color = estatus == 'liberado'
+          ? const Color(0xFF66BB6A)
           : const Color(0xFFD32F2F);
 
       for (final ring in rings) {
