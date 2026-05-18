@@ -558,7 +558,11 @@ final importedGeoJsonPrediosProvider =
 
     final mergedFeatures = <Map<String, dynamic>>[];
     for (final assetPath in importAssets) {
-      mergedFeatures.addAll(await readFeatures(assetPath));
+      try {
+        mergedFeatures.addAll(await readFeatures(assetPath));
+      } catch (_) {
+        // Mantener carga parcial: si un archivo falla, no bloquear los demas.
+      }
     }
 
     return mergedFeatures
