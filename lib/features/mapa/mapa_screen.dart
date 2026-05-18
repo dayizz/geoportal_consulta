@@ -489,8 +489,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
-        // Etiquetas compatibles con la capa satelital de ArcGIS (lugares/municipios).
-        // Se usa el mismo proveedor para evitar desalineacion y nombres inconsistentes.
+        // Etiquetas completas compatibles con la capa satelital de ArcGIS.
+        // Se combinan transporte + lugares para mostrar vialidades y toponimia.
+        if (_baseLayer == _BaseLayer.satelital)
+          TileLayer(
+            urlTemplate:
+                'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'mx.sao.geoportal_consulta',
+            maxZoom: 19,
+          ),
         if (_baseLayer == _BaseLayer.satelital)
           TileLayer(
             urlTemplate:
