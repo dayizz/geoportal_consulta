@@ -1383,6 +1383,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
+    final props = (feature.geometry['properties'] as Map<String, dynamic>?) ?? {};
+    final clave = _getClaveFromFeature(props);
+    final estatus = _getEstatusFromFeature(props);
+    final segmento = _getSegmentoFromFeature(props);
+    final kmInicio = _getKmInicioFromFeature(props);
+    final kmFin = _getKmFinFromFeature(props);
+    final tipoPropiedad = _getTipoPropiedadFromFeature(props);
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -1417,7 +1425,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        feature.id,
+                        clave.isNotEmpty ? clave : feature.id,
                         style: GoogleFonts.inter(
                           color: Colors.white,
                           fontSize: 15,
@@ -1444,31 +1452,35 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Estado (si aplica)
-                  if (feature.estatus != null) ...[
-                    _sectionTitle('Estado'),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _colorForStatus(feature.estatus ?? ''),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        feature.estatus ?? 'N/A',
-                        style: GoogleFonts.inter(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
+                  // Sección de información principal
+                  _sectionTitle('Información'),
+                  const SizedBox(height: 8),
+                  if (clave.isNotEmpty)
+                    _infoRow('Clave/Clave SEDATU', clave)
+                  else
+                    _infoRow('Clave/Clave SEDATU', ''),
+                  if (estatus.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Estatus', estatus),
                   ],
-                  // Banderas
+                  if (kmInicio.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('KM Inicio', kmInicio),
+                  ],
+                  if (kmFin.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('KM Fin', kmFin),
+                  ],
+                  if (segmento.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Segmento', segmento),
+                  ],
+                  if (tipoPropiedad.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Tipo de Propiedad', tipoPropiedad),
+                  ],
+                  const SizedBox(height: 16),
+                  // Banderas de clasificación
                   if (feature.esEstacion || feature.esEnvolvente) ...[
                     _sectionTitle('Clasificación'),
                     const SizedBox(height: 8),
@@ -1476,31 +1488,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       _classificationTag('Estación', Colors.amber),
                     if (feature.esEnvolvente)
                       _classificationTag('Envolvente', Colors.blue),
-                    const SizedBox(height: 12),
-                  ],
-                  // Información del ID
-                  _sectionTitle('Identificador'),
-                  const SizedBox(height: 8),
-                  _infoRow('ID', feature.id),
-                  const SizedBox(height: 12),
-                  // Tipo de geometría
-                  _sectionTitle('Geometría'),
-                  const SizedBox(height: 8),
-                  _infoRow(
-                    'Tipo',
-                    (feature.geometry['type'] as String?) ?? 'N/A',
-                  ),
-                  const SizedBox(height: 12),
-                  // Propiedades adicionales si las hay
-                  if ((feature.geometry['properties'] as Map?) != null) ...[
-                    _sectionTitle('Propiedades'),
-                    const SizedBox(height: 8),
-                    ...((feature.geometry['properties'] as Map<String, dynamic>?)
-                            ?.entries
-                            .map((e) => _infoRow(e.key, e.value.toString()))
-                            .toList() ??
-                        []),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                   ],
                   // Botón para cerrar
                   FilledButton.tonal(
@@ -1515,6 +1503,96 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ],
       ),
     );
+  }
+
+  /// Extrae clave del feature (busca en CLAVE o NOM_SEDATU)
+  String _getClaveFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    // Busca CLAVE (exacta o case-insensitive)
+    for (final key in keys) {
+      if (key.toUpperCase() == 'CLAVE') {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    // Busca NOM_SEDATU o variantes
+    for (final key in keys) {
+      if (key.toUpperCase().contains('SEDATU')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
+  }
+
+  /// Extrae estatus (busca ESTATUS con normalización de valores)
+  String _getEstatusFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase() == 'ESTATUS') {
+        final value = properties[key]?.toString().trim() ?? '';
+        // Normaliza: Liberado o No liberado
+        if (value.toUpperCase().contains('LIBERADO')) {
+          return value.toUpperCase() == 'LIBERADO' ? 'Liberado' : 'No liberado';
+        }
+        return value;
+      }
+    }
+    return '';
+  }
+
+  /// Extrae segmento
+  String _getSegmentoFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase() == 'SEGMENTO') {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
+  }
+
+  /// Extrae KM Inicio
+  String _getKmInicioFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('KM') && upper.contains('INICIO')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
+  }
+
+  /// Extrae KM Fin
+  String _getKmFinFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('KM') && upper.contains('FIN')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
+  }
+
+  /// Extrae tipo de propiedad (Privada o Social)
+  String _getTipoPropiedadFromFeature(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('TIPO') && upper.contains('PROPIEDAD')) {
+        final value = properties[key]?.toString().trim() ?? '';
+        // Normaliza a Privada o Social
+        if (value.toUpperCase().contains('PRIV')) return 'Privada';
+        if (value.toUpperCase().contains('SOC')) return 'Social';
+        return value;
+      }
+    }
+    return '';
   }
 
   Color _colorForStatus(String status) {
