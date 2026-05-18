@@ -524,17 +524,19 @@ final importedGeoJsonPrediosProvider =
           .toList();
     }
 
-    final prediosFeatures = await readFeatures('assets/data/TSNL_16_17.geojson');
-    final envolventesPoligono =
-        await readFeatures('assets/data/ENVOLVENTES_P_TSNL.geojson');
-    final envolventesLinea =
-        await readFeatures('assets/data/ENVOLVENTES_L_TSNL.geojson');
-
-    final mergedFeatures = [
-      ...prediosFeatures,
-      ...envolventesPoligono,
-      ...envolventesLinea,
+    final importAssets = <String>[
+      'assets/data/TSNL_16_17.geojson',
+      'assets/data/ENVOLVENTES_P_TSNL.geojson',
+      'assets/data/ENVOLVENTES_L_TSNL.geojson',
+      'assets/data/SEGMENTO13_TSNL_1805.geojson',
+      'assets/data/segmento_18.geojson',
+      'assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson',
     ];
+
+    final mergedFeatures = <Map<String, dynamic>>[];
+    for (final assetPath in importAssets) {
+      mergedFeatures.addAll(await readFeatures(assetPath));
+    }
 
     return mergedFeatures
         .map((feature) {
