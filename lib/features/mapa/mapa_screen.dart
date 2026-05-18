@@ -489,15 +489,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
-        // Etiquetas transparentes sobre satelital (calles, colonias, municipios, etc.)
-        if (_baseLayer == _BaseLayer.satelital)
-          TileLayer(
-            urlTemplate:
-                'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            subdomains: const ['a', 'b', 'c', 'd'],
-            maxZoom: 19,
-          ),
+        // Se removio overlay de etiquetas para evitar lineas blancas y rotulos
+        // inconsistentes sobre la capa satelital.
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
         if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
