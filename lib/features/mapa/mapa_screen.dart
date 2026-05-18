@@ -220,11 +220,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<MunicipioLimite> municipios,
     List<GeoJsonPredioFeature> importedGeoJsonPredios,
   ) {
-    if (_filterSoloEstaciones) {
-      importedGeoJsonPredios = importedGeoJsonPredios.where((f) => f.esEstacion).toList();
-    }
-    _ensureImportedGeoJsonFocus(importedGeoJsonPredios);
     final filteredPredios = _applyAllFilters(predios);
+    final filteredImportedGeoJson = _applyAllImportedFilters(importedGeoJsonPredios);
+    _ensureImportedGeoJsonFocus(filteredImportedGeoJson);
     _ensureInitialFocus(predios, importedGeoJsonPredios);
     final polygons = <Polygon>[];
     final importedPolygons = <Polygon>[];
@@ -302,7 +300,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    for (final feature in importedGeoJsonPredios) {
+    for (final feature in filteredImportedGeoJson) {
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
@@ -440,7 +438,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         initialZoom: _defaultZoom,
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          final nonEnvolventes = importedGeoJsonPredios.where((f) => !f.esEnvolvente).toList();
+          final nonEnvolventes =
+              filteredImportedGeoJson.where((f) => !f.esEnvolvente).toList();
           final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
           setState(() {
             // Muestra solo una ficha: prioriza la última ficha implementada
@@ -962,192 +961,229 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       barrierDismissible: true,
       barrierLabel: 'Cerrar filtros avanzados',
       barrierColor: Colors.black45,
-      pageBuilder: (_, __, ___) {
-        return SafeArea(
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: Container(
-              width: 360,
-              height: double.infinity,
-              color: const Color(0xFF123529),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                child: DefaultTextStyle.merge(
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    decoration: TextDecoration.none,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Filtros avanzados',
-                          style: GoogleFonts.inter(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _countSection(
-                      title: 'Estatus',
-                      counts: estatusCounts,
-                      selectedLabel: _liberacionFilterLabel(_liberacionFilter),
-                      onChipTap: (estatus) {
-                        setState(() {
-                          _liberacionFilter = _liberacionFilterFromLabel(estatus);
-                          _selectedPredio = null;
-                          _selectedMunicipio = null;
-                          _lastFocusedMunicipioKey = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _countSection(
-                      title: 'Segmentos',
-                      counts: segmentoCounts,
-                      selectedLabel:
-                          _segmentoQuery.isEmpty ? null : _segmentoQuery,
-                      onChipTap: (segmento) {
-                        setState(() {
-                          if (_segmentoQuery == segmento) {
-                            _segmentoQuery = '';
-                          } else {
-                            _segmentoQuery = segmento;
-                          }
-                          _selectedPredio = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _countSection(
-                      title: 'Municipios',
-                      counts: allMunicipioCounts,
-                      selectedLabel: _selectedMunicipio,
-                      onChipTap: (municipio) {
-                        setState(() {
-                          if (municipio == 'Sin municipio') {
-                            _selectedMunicipio = 'Sin municipio';
-                          } else if (_selectedMunicipio == municipio) {
-                            _selectedMunicipio = null;
-                          } else {
-                            _selectedMunicipio = municipio;
-                          }
-                          _lastFocusedMunicipioKey = null;
-                          _selectedPredio = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _countSection(
-                      title: 'Estado/ubicacion detectada',
-                      counts: estadoGestionCounts,
-                      selectedLabel: _selectedEstadoGestion,
-                      onChipTap: (estado) {
-                        setState(() {
-                          if (_selectedEstadoGestion == estado) {
-                            _selectedEstadoGestion = null;
-                          } else {
-                            _selectedEstadoGestion = estado;
-                          }
-                          _selectedPredio = null;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _countSection(
-                      title: 'Clasificación',
-                      counts: clasificaCounts,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Solo Estaciones',
-                              style: GoogleFonts.inter(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              '$estacionesCount estaciones disponibles',
-                              style: GoogleFonts.inter(
-                                color: Colors.white54,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        Switch.adaptive(
-                          value: _filterSoloEstaciones,
-                          onChanged: (v) => setState(() => _filterSoloEstaciones = v),
-                          activeColor: const Color(0xFFFFD54F),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => setState(() {
-                              _liberacionFilter = _LiberacionFilter.todos;
-                              _segmentoQuery = '';
-                              _selectedMunicipio = null;
-                              _selectedEstadoGestion = null;
-                              _selectedPredio = null;
-                              _lastFocusedMunicipioKey = null;
-                              _filterSoloEstaciones = false;
-                            }),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: BorderSide(color: Colors.white.withOpacity(0.45)),
-                            ),
-                            child: const Text('Limpiar'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2E7D32),
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('Aplicar'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${_applyAllFilters(predios).length} predios visibles',
+      pageBuilder: (dialogContext, __, ___) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            void updateFilters(VoidCallback changes) {
+              if (!mounted) return;
+              setState(changes);
+              setModalState(() {});
+            }
+
+            return SafeArea(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  width: 360,
+                  height: double.infinity,
+                  color: const Color(0xFF123529),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                    child: DefaultTextStyle.merge(
                       style: GoogleFonts.inter(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        decoration: TextDecoration.none,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'Filtros avanzados',
+                                style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                onPressed: () => Navigator.of(dialogContext).pop(),
+                                icon: const Icon(Icons.close, color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _countSection(
+                            title: 'Estatus',
+                            counts: estatusCounts,
+                            selectedLabel: _liberacionFilterLabel(_liberacionFilter),
+                            onChipTap: (estatus) {
+                              updateFilters(() {
+                                _liberacionFilter = _liberacionFilterFromLabel(estatus);
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                                // Limpiar otros filtros para ser mutuamente excluyentes
+                                _segmentoQuery = '';
+                                _selectedMunicipio = null;
+                                _selectedEstadoGestion = null;
+                                _lastFocusedMunicipioKey = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _countSection(
+                            title: 'Segmentos',
+                            counts: segmentoCounts,
+                            selectedLabel:
+                                _segmentoQuery.isEmpty ? null : _segmentoQuery,
+                            onChipTap: (segmento) {
+                              updateFilters(() {
+                                if (_segmentoQuery == segmento) {
+                                  _segmentoQuery = '';
+                                } else {
+                                  _segmentoQuery = segmento;
+                                  // Limpiar otros filtros para ser mutuamente excluyentes
+                                  _liberacionFilter = _LiberacionFilter.todos;
+                                  _selectedMunicipio = null;
+                                  _selectedEstadoGestion = null;
+                                  _lastFocusedMunicipioKey = null;
+                                }
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _countSection(
+                            title: 'Municipios',
+                            counts: allMunicipioCounts,
+                            selectedLabel: _selectedMunicipio,
+                            onChipTap: (municipio) {
+                              updateFilters(() {
+                                if (municipio == 'Sin municipio') {
+                                  _selectedMunicipio = 'Sin municipio';
+                                } else if (_selectedMunicipio == municipio) {
+                                  _selectedMunicipio = null;
+                                } else {
+                                  _selectedMunicipio = municipio;
+                                  // Limpiar otros filtros para ser mutuamente excluyentes
+                                  _liberacionFilter = _LiberacionFilter.todos;
+                                  _segmentoQuery = '';
+                                  _selectedEstadoGestion = null;
+                                }
+                                _lastFocusedMunicipioKey = null;
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _countSection(
+                            title: 'Estado/ubicacion detectada',
+                            counts: estadoGestionCounts,
+                            selectedLabel: _selectedEstadoGestion,
+                            onChipTap: (estado) {
+                              updateFilters(() {
+                                if (_selectedEstadoGestion == estado) {
+                                  _selectedEstadoGestion = null;
+                                } else {
+                                  _selectedEstadoGestion = estado;
+                                  // Limpiar otros filtros para ser mutuamente excluyentes
+                                  _liberacionFilter = _LiberacionFilter.todos;
+                                  _segmentoQuery = '';
+                                  _selectedMunicipio = null;
+                                  _lastFocusedMunicipioKey = null;
+                                }
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _countSection(
+                            title: 'Clasificación',
+                            counts: clasificaCounts,
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Solo Estaciones',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$estacionesCount estaciones disponibles',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const Spacer(),
+                              Switch.adaptive(
+                                value: _filterSoloEstaciones,
+                                onChanged: (v) => updateFilters(() {
+                                  _filterSoloEstaciones = v;
+                                  _selectedPredio = null;
+                                  _selectedImportedFeature = null;
+                                }),
+                                activeColor: const Color(0xFFFFD54F),
+                              ),
+                            ],
+                          ),
+                          const Spacer(),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => updateFilters(() {
+                                    _liberacionFilter = _LiberacionFilter.todos;
+                                    _segmentoQuery = '';
+                                    _selectedMunicipio = null;
+                                    _selectedEstadoGestion = null;
+                                    _selectedPredio = null;
+                                    _selectedImportedFeature = null;
+                                    _lastFocusedMunicipioKey = null;
+                                    _filterSoloEstaciones = false;
+                                  }),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    side: BorderSide(
+                                        color: Colors.white.withOpacity(0.45)),
+                                  ),
+                                  child: const Text('Limpiar'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () => Navigator.of(dialogContext).pop(),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2E7D32),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Aplicar'),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${_applyAllFilters(predios).length} predios visibles',
+                            style: GoogleFonts.inter(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    ],
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -1991,6 +2027,106 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final segmento = _extractSegmentNumber(p.tramo);
       return segmento == query;
     }).toList();
+  }
+
+  List<GeoJsonPredioFeature> _applyAllImportedFilters(
+    List<GeoJsonPredioFeature> features,
+  ) {
+    // Separar envolventes (siempre visibles excepto con Solo Estaciones)
+    final envolventes = features.where((f) => f.esEnvolvente).toList();
+    var nonEnvolventes = features.where((f) => !f.esEnvolvente).toList();
+
+    // Aplicar Solo Estaciones si está activo
+    if (_filterSoloEstaciones) {
+      nonEnvolventes = nonEnvolventes.where((f) => f.esEstacion).toList();
+      // Con Solo Estaciones, excluir también envolventes
+      return nonEnvolventes;
+    }
+
+    var filtered = nonEnvolventes;
+
+    if (_liberacionFilter != _LiberacionFilter.todos) {
+      filtered = filtered.where((feature) {
+        final status = _normalizedStatus(
+          _getEstatusFromFeature(feature.properties),
+        );
+        if (_liberacionFilter == _LiberacionFilter.liberados) {
+          return status == 'liberado';
+        }
+        return status == 'no_liberado';
+      }).toList();
+    }
+
+    final segmento = _extractSegmentNumber(_segmentoQuery);
+    if (segmento.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final featureSegment = _extractSegmentNumber(
+          _getSegmentoFromFeature(feature.properties),
+        );
+        return featureSegment == segmento;
+      }).toList();
+    }
+
+    final municipio = _selectedMunicipio;
+    if (municipio != null) {
+      final selectedKey = _normalizeMunicipioName(municipio);
+      filtered = filtered.where((feature) {
+        final value = _getMunicipioFromFeature(feature.properties).trim();
+        if (municipio == 'Sin municipio') return value.isEmpty;
+        if (value.isEmpty) return false;
+        return _normalizeMunicipioName(value) == selectedKey;
+      }).toList();
+    }
+
+    final estado = _selectedEstadoGestion;
+    if (estado != null) {
+      filtered = filtered.where((feature) {
+        return _getEstadoFromFeature(feature.properties) == estado;
+      }).toList();
+    }
+
+    // Retornar contenido filtrado + envolventes siempre visibles
+    return [...filtered, ...envolventes];
+  }
+
+  String _getMunicipioFromFeature(Map<String, dynamic> properties) {
+    return _extractPropertyByKeyFragments(
+      properties,
+      ['MUNICIPIO'],
+      fallbackFragments: ['EJIDO', 'LOCALIDAD'],
+    );
+  }
+
+  String _getEstadoFromFeature(Map<String, dynamic> properties) {
+    return _extractPropertyByKeyFragments(
+      properties,
+      ['ESTADO'],
+      fallbackFragments: ['UBICACION', 'ENTIDAD'],
+    );
+  }
+
+  String _extractPropertyByKeyFragments(
+    Map<String, dynamic> properties,
+    List<String> primaryFragments, {
+    List<String> fallbackFragments = const [],
+  }) {
+    final keys = properties.keys.toList();
+
+    String findByFragments(List<String> fragments) {
+      for (final key in keys) {
+        final upper = key.toUpperCase();
+        final match = fragments.every((fragment) => upper.contains(fragment));
+        if (match) {
+          return properties[key]?.toString().trim() ?? '';
+        }
+      }
+      return '';
+    }
+
+    final primary = findByFragments(primaryFragments);
+    if (primary.isNotEmpty) return primary;
+    if (fallbackFragments.isEmpty) return '';
+    return findByFragments(fallbackFragments);
   }
 
   String _extractSegmentNumber(String? value) {

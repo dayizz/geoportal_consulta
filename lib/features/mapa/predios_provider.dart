@@ -575,14 +575,7 @@ final importedGeoJsonPrediosProvider =
           final hasEnvolventeProp = props.values.any(
             (value) => value.toString().toLowerCase().contains('envolvente'),
           );
-          final hasEstacionProp = [
-            ...props.keys.map((key) => key.toString()),
-            ...props.values.map((value) => value.toString()),
-          ].any((value) {
-            final normalized = value.toLowerCase();
-            return normalized.contains('estacion') ||
-                normalized.contains('estación');
-          });
+          final hasEstacionProp = sourceAsset.contains('estaciones_y_edificios');
           return GeoJsonPredioFeature(
             id: _extractDisplayId(props),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
