@@ -341,7 +341,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         markerPoint ??= _centroid(line);
       }
 
-      if (shouldDrawImportedGroups() && markerPoint != null) {
+      if (shouldDrawImportedGroups() && markerPoint != null && !feature.esEnvolvente) {
         _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
       }
     }
@@ -403,7 +403,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         initialZoom: _defaultZoom,
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          final tappedImported = _findImportedFeatureAtPoint(point, importedGeoJsonPredios);
+          final nonEnvolventes = importedGeoJsonPredios.where((f) => !f.esEnvolvente).toList();
+          final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
           setState(() {
             _selectedPredio = tappedPredio;
             _selectedImportedFeature = tappedImported;
