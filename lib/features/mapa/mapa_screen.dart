@@ -71,6 +71,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
   Predio? _selectedPredio;
+  GeoJsonPredioFeature? _selectedImportedFeature;
   String? _selectedMunicipio;
   String? _selectedEstadoGestion;
   _ColorMode _colorMode = _ColorMode.estado;
@@ -176,6 +177,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               bottom: 0,
               width: 320,
               child: _buildDetailPanel(_selectedPredio!),
+            ),
+          if (_selectedImportedFeature != null)
+            Positioned(
+              right: 0,
+              top: 112,
+              bottom: 0,
+              width: 320,
+              child: _buildDetailPanelForImportedFeature(_selectedImportedFeature!),
             ),
 
           // ─── Selector de capas ──────────────────────────────────────────────
@@ -394,7 +403,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         initialZoom: _defaultZoom,
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          setState(() => _selectedPredio = tappedPredio);
+          final tappedImported = _findImportedFeatureAtPoint(point, importedGeoJsonPredios);
+          setState(() {
+            _selectedPredio = tappedPredio;
+            _selectedImportedFeature = tappedImported;
+          });
         },
         onPositionChanged: (position, hasGesture) {
           final nextZoom = position.zoom ?? _currentZoom;
@@ -453,6 +466,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (ring.length < 3) continue;
         if (_isPointInPolygon(point, ring)) {
           return p;
+        }
+      }
+    }
+    return null;
+  }
+
+  GeoJsonPredioFeature? _findImportedFeatureAtPoint(
+    LatLng point,
+    List<GeoJsonPredioFeature> features,
+  ) {
+    for (final feature in features.reversed) {
+      final polys = _extractPolygons(feature.geometry);
+      for (final ring in polys) {
+        if (ring.length < 3) continue;
+        if (_isPointInPolygon(point, ring)) {
+          return feature;
         }
       }
     }
@@ -1349,6 +1378,167 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 12,
+            offset: Offset(-4, 0),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Cabecera del panel
+          Container(
+            color: const Color(0xFF1B4332),
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Feature GeoJSON',
+                        style: GoogleFonts.inter(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        feature.id,
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () =>
+                      setState(() => _selectedImportedFeature = null),
+                ),
+              ],
+            ),
+          ),
+          // Contenido desplazable
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Estado (si aplica)
+                  if (feature.estatus != null) ...[
+                    _sectionTitle('Estado'),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _colorForStatus(feature.estatus ?? ''),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        feature.estatus ?? 'N/A',
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // Banderas
+                  if (feature.esEstacion || feature.esEnvolvente) ...[
+                    _sectionTitle('Clasificación'),
+                    const SizedBox(height: 8),
+                    if (feature.esEstacion)
+                      _classificationTag('Estación', Colors.amber),
+                    if (feature.esEnvolvente)
+                      _classificationTag('Envolvente', Colors.blue),
+                    const SizedBox(height: 12),
+                  ],
+                  // Información del ID
+                  _sectionTitle('Identificador'),
+                  const SizedBox(height: 8),
+                  _infoRow('ID', feature.id),
+                  const SizedBox(height: 12),
+                  // Tipo de geometría
+                  _sectionTitle('Geometría'),
+                  const SizedBox(height: 8),
+                  _infoRow(
+                    'Tipo',
+                    (feature.geometry['type'] as String?) ?? 'N/A',
+                  ),
+                  const SizedBox(height: 12),
+                  // Propiedades adicionales si las hay
+                  if ((feature.geometry['properties'] as Map?) != null) ...[
+                    _sectionTitle('Propiedades'),
+                    const SizedBox(height: 8),
+                    ...((feature.geometry['properties'] as Map<String, dynamic>?)
+                            ?.entries
+                            .map((e) => _infoRow(e.key, e.value.toString()))
+                            .toList() ??
+                        []),
+                    const SizedBox(height: 12),
+                  ],
+                  // Botón para cerrar
+                  FilledButton.tonal(
+                    onPressed: () =>
+                        setState(() => _selectedImportedFeature = null),
+                    child: const Text('Cerrar'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _colorForStatus(String status) {
+    final lower = status.trim().toLowerCase();
+    if (lower == 'liberado') return const Color(0xFFCDDC39);
+    if (lower == 'no liberado') return const Color(0xFFD32F2F);
+    return Colors.grey;
+  }
+
+  Widget _classificationTag(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
