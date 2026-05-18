@@ -72,6 +72,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   final MapController _mapCtrl = MapController();
   Predio? _selectedPredio;
   GeoJsonPredioFeature? _selectedImportedFeature;
+  bool _filterSoloEstaciones = false;
   String? _selectedMunicipio;
   String? _selectedEstadoGestion;
   _ColorMode _colorMode = _ColorMode.estado;
@@ -219,6 +220,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<MunicipioLimite> municipios,
     List<GeoJsonPredioFeature> importedGeoJsonPredios,
   ) {
+    if (_filterSoloEstaciones) {
+      importedGeoJsonPredios = importedGeoJsonPredios.where((f) => f.esEstacion).toList();
+    }
     _ensureImportedGeoJsonFocus(importedGeoJsonPredios);
     final filteredPredios = _applyAllFilters(predios);
     _ensureInitialFocus(predios, importedGeoJsonPredios);
@@ -236,7 +240,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     // Mostrar polígonos desde el zoom inicial para evitar mapa sin geometrías visibles.
     bool shouldDrawPolygons() => _currentZoom >= 10;
     // Las capas importadas deben permanecer visibles también a zoom lejano.
-    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 11;
+    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 13;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -342,7 +346,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
 
       if (shouldDrawImportedGroups() && markerPoint != null && !feature.esEnvolvente) {
-        _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
+        final bucket = _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
+        final estatusLower = feature.estatus?.trim().toLowerCase() ?? '';
+        if (estatusLower == 'liberado') bucket.liberados++;
+        if (estatusLower.contains('no liberado')) bucket.noLiberados++;
       }
     }
 
@@ -350,8 +357,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final mergedImportedBuckets =
           _mergeOverlappingBuckets(importedBucketed.values.toList(), bucketSize);
       for (final bucket in mergedImportedBuckets) {
+        final clusterColor = bucket.liberados > bucket.noLiberados
+            ? const Color(0xFF388E3C)
+            : bucket.noLiberados > 0
+                ? const Color(0xFFD32F2F)
+                : const Color(0xFFF9A825);
         importedMarkers.add(
-          _buildCountMarker(bucket.center, bucket.count, const Color(0xFFF9A825)),
+          _buildCountMarker(bucket.center, bucket.count, clusterColor),
         );
       }
     }
@@ -394,6 +406,31 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       _focusSelectedMunicipioBoundary(selectedKey, selectedBoundaryPoints);
     } else {
       _lastFocusedMunicipioKey = null;
+    }
+
+    // Icono de ubicación para el feature GeoJSON seleccionado
+    final selectedFeaturePin = <Marker>[];
+    if (_selectedImportedFeature != null) {
+      final rings = _extractPolygons(_selectedImportedFeature!.geometry);
+      LatLng? pinPos;
+      if (rings.isNotEmpty && rings.first.isNotEmpty) {
+        pinPos = _centroid(rings.first);
+      } else {
+        final lines = _extractPolylines(_selectedImportedFeature!.geometry);
+        if (lines.isNotEmpty) pinPos = _centroid(lines.first);
+      }
+      if (pinPos != null) {
+        selectedFeaturePin.add(Marker(
+          point: pinPos,
+          width: 40,
+          height: 44,
+          child: const Icon(
+            Icons.location_on,
+            color: Color(0xFFFF5722),
+            size: 38,
+          ),
+        ));
+      }
     }
 
     return FlutterMap(
@@ -441,6 +478,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (municipalPolylines.isNotEmpty)
           PolylineLayer(polylines: municipalPolylines),
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
+        if (selectedFeaturePin.isNotEmpty) MarkerLayer(markers: selectedFeaturePin),
       ],
     );
   }
@@ -883,7 +921,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     _segmentoQuery.isEmpty &&
                             _selectedMunicipio == null &&
                             _selectedEstadoGestion == null &&
-                            _liberacionFilter == _LiberacionFilter.todos
+                            _liberacionFilter == _LiberacionFilter.todos &&
+                            !_filterSoloEstaciones
                         ? 'Filtros avanzados'
                         : 'Filtros avanzados *',
                     style: GoogleFonts.inter(
@@ -908,6 +947,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     Map<String, int> estatusCounts,
     Map<String, int> estadoGestionCounts,
   ) async {
+    final importedFeatures =
+        ref.read(importedGeoJsonPrediosProvider).valueOrNull ?? const [];
+    final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -1019,6 +1061,37 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       title: 'Clasificación',
                       counts: clasificaCounts,
                     ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Solo Estaciones',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              '$estacionesCount estaciones disponibles',
+                              style: GoogleFonts.inter(
+                                color: Colors.white54,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Switch.adaptive(
+                          value: _filterSoloEstaciones,
+                          onChanged: (v) => setState(() => _filterSoloEstaciones = v),
+                          activeColor: const Color(0xFFFFD54F),
+                        ),
+                      ],
+                    ),
                     const Spacer(),
                     Row(
                       children: [
@@ -1031,6 +1104,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                               _selectedEstadoGestion = null;
                               _selectedPredio = null;
                               _lastFocusedMunicipioKey = null;
+                              _filterSoloEstaciones = false;
                             }),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white,
