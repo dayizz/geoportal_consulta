@@ -86,6 +86,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   DateTime? _lastRefresh;
   late AnimationController _spinCtrl;
   double _currentZoom = _defaultZoom;
+  int _zoomRenderStep = (_defaultZoom * 2).round();
 
   // Caches para optimización
   late GeometryCache _geometryCache;
@@ -236,7 +237,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final importedBucketed = <String, _HeatBucket>{};
 
     // Mostrar polígonos desde el zoom inicial para evitar mapa sin geometrías visibles.
-    bool shouldDrawPolygons() => _currentZoom >= 10;
+    bool shouldDrawPolygons() => _currentZoom >= 10.8;
     // Las capas importadas deben permanecer visibles también a zoom lejano.
     bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 13;
 
@@ -256,8 +257,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (shouldDrawPolygons()) {
           for (final coords in polys) {
             if (coords.isNotEmpty) {
+              final drawCoords = _simplifyGeometryForZoom(
+                coords,
+                _currentZoom,
+                isPolygon: true,
+              );
+              if (drawCoords.length < 3) continue;
               polygons.add(Polygon(
-                points: coords,
+                points: drawCoords,
                 color: color.withOpacity(0.35),
                 borderColor: color.withOpacity(0.95),
                 borderStrokeWidth: 3.6,
@@ -320,9 +327,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
       for (final ring in rings) {
         if (ring.length < 3) continue;
+        final drawRing = _simplifyGeometryForZoom(
+          ring,
+          _currentZoom,
+          isPolygon: true,
+        );
+        if (drawRing.length < 3) continue;
         importedPolygons.add(
           Polygon(
-            points: ring,
+            points: drawRing,
             color: fillColor.withOpacity(polygonOpacity),
             borderColor: borderColor,
             borderStrokeWidth: borderWidth,
@@ -333,9 +346,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
       for (final line in lines) {
         if (line.length < 2) continue;
+        final drawLine = _simplifyGeometryForZoom(
+          line,
+          _currentZoom,
+          isPolygon: false,
+        );
+        if (drawLine.length < 2) continue;
         importedPolylines.add(
           Polyline(
-            points: line,
+            points: drawLine,
             strokeWidth: _currentZoom >= 11 ? 2.4 : 1.4,
             color: borderColor.withOpacity(0.92),
           ),
@@ -455,8 +474,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         },
         onPositionChanged: (position, hasGesture) {
           final nextZoom = position.zoom ?? _currentZoom;
-          if ((nextZoom - _currentZoom).abs() >= 0.2) {
-            setState(() => _currentZoom = nextZoom);
+          final nextStep = (nextZoom * 2).round();
+          if (nextStep != _zoomRenderStep) {
+            setState(() {
+              _currentZoom = nextZoom;
+              _zoomRenderStep = nextStep;
+            });
           }
         },
       ),
@@ -681,6 +704,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<_HeatBucket> buckets,
     double bucketSize,
   ) {
+    // Evitar costo O(n^2) en zoom lejano con muchos grupos.
+    if (buckets.length > 220) return buckets;
     if (buckets.length <= 1) return buckets;
 
     final pending = [...buckets]..sort((a, b) => b.count.compareTo(a.count));
@@ -1934,33 +1959,70 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<List<LatLng>> _extractPolygons(Map<String, dynamic> geo) {
-    final type = geo['type'] as String?;
-    if (type == 'Polygon') {
-      final coords = geo['coordinates'] as List?;
-      if (coords == null || coords.isEmpty) return [];
-      return [_toLatLngs(coords[0] as List)];
-    } else if (type == 'MultiPolygon') {
-      final multiCoords = geo['coordinates'] as List?;
-      if (multiCoords == null) return [];
-      return multiCoords
-          .map((poly) => _toLatLngs((poly as List)[0] as List))
-          .toList();
-    }
-    return [];
+    final geometryId = 'poly:${identityHashCode(geo)}';
+    return _geometryCache.getPolygons(geometryId, geo, (geometry) {
+      final type = geometry['type'] as String?;
+      if (type == 'Polygon') {
+        final coords = geometry['coordinates'] as List?;
+        if (coords == null || coords.isEmpty) return const [];
+        return [_toLatLngs(coords[0] as List)];
+      } else if (type == 'MultiPolygon') {
+        final multiCoords = geometry['coordinates'] as List?;
+        if (multiCoords == null) return const [];
+        return multiCoords
+            .map((poly) => _toLatLngs((poly as List)[0] as List))
+            .toList();
+      }
+      return const [];
+    });
   }
 
   List<List<LatLng>> _extractPolylines(Map<String, dynamic> geo) {
-    final type = geo['type'] as String?;
-    if (type == 'LineString') {
-      final coords = geo['coordinates'] as List?;
-      if (coords == null || coords.isEmpty) return [];
-      return [_toLatLngs(coords)];
-    } else if (type == 'MultiLineString') {
-      final multiCoords = geo['coordinates'] as List?;
-      if (multiCoords == null) return [];
-      return multiCoords.map((line) => _toLatLngs(line as List)).toList();
+    final geometryId = 'line:${identityHashCode(geo)}';
+    return _geometryCache.getPolylines(geometryId, geo, (geometry) {
+      final type = geometry['type'] as String?;
+      if (type == 'LineString') {
+        final coords = geometry['coordinates'] as List?;
+        if (coords == null || coords.isEmpty) return const [];
+        return [_toLatLngs(coords)];
+      } else if (type == 'MultiLineString') {
+        final multiCoords = geometry['coordinates'] as List?;
+        if (multiCoords == null) return const [];
+        return multiCoords.map((line) => _toLatLngs(line as List)).toList();
+      }
+      return const [];
+    });
+  }
+
+  List<LatLng> _simplifyGeometryForZoom(
+    List<LatLng> points,
+    double zoom, {
+    required bool isPolygon,
+  }) {
+    if (points.length < 8) return points;
+
+    final stride = zoom >= 13
+        ? 1
+        : zoom >= 12
+            ? 2
+            : zoom >= 11
+                ? 3
+                : 5;
+    if (stride <= 1) return points;
+
+    final sampled = <LatLng>[];
+    for (int i = 0; i < points.length; i += stride) {
+      sampled.add(points[i]);
     }
-    return [];
+
+    final last = points.last;
+    if (sampled.isEmpty || sampled.last != last) {
+      sampled.add(last);
+    }
+
+    if (isPolygon && sampled.length < 3) return points;
+    if (!isPolygon && sampled.length < 2) return points;
+    return sampled;
   }
 
   List<LatLng> _toLatLngs(List raw) {
