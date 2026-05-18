@@ -2032,19 +2032,21 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   List<GeoJsonPredioFeature> _applyAllImportedFilters(
     List<GeoJsonPredioFeature> features,
   ) {
-    // Separar envolventes (siempre visibles excepto con Solo Estaciones)
+    // Separar envolventes (SIEMPRE visibles)
     final envolventes = features.where((f) => f.esEnvolvente).toList();
     var nonEnvolventes = features.where((f) => !f.esEnvolvente).toList();
 
-    // Aplicar Solo Estaciones si está activo
+    // Si Solo Estaciones está activo: SOLO estaciones (+ envolventes al final)
     if (_filterSoloEstaciones) {
-      nonEnvolventes = nonEnvolventes.where((f) => f.esEstacion).toList();
-      // Con Solo Estaciones, excluir también envolventes
-      return nonEnvolventes;
+      final soloEstaciones =
+          nonEnvolventes.where((f) => f.esEstacion).toList();
+      // Retornar: estaciones + envolventes siempre
+      return [...soloEstaciones, ...envolventes];
     }
 
     var filtered = nonEnvolventes;
 
+    // Aplicar otros filtros solo si NO está "Solo Estaciones"
     if (_liberacionFilter != _LiberacionFilter.todos) {
       filtered = filtered.where((feature) {
         final status = _normalizedStatus(
@@ -2085,7 +2087,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    // Retornar contenido filtrado + envolventes siempre visibles
+    // Retornar: contenido filtrado + envolventes siempre visibles
     return [...filtered, ...envolventes];
   }
 
