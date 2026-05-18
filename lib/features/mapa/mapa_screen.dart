@@ -1402,13 +1402,19 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<LatLng> _toLatLngs(List raw) {
-    return raw.map((c) {
+    final points = <LatLng>[];
+    for (final c in raw) {
       final coord = c as List;
-      return LatLng(
-        (coord[1] as num).toDouble(),
-        (coord[0] as num).toDouble(),
-      );
-    }).toList();
+      final lng = (coord[0] as num).toDouble();
+      final lat = (coord[1] as num).toDouble();
+
+      // Descarta coordenadas fuera de rango geográfico (datos proyectados o corruptos).
+      if (!lng.isFinite || !lat.isFinite) continue;
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
+
+      points.add(LatLng(lat, lng));
+    }
+    return points;
   }
 
   LatLng _centroid(List<LatLng> points) {
