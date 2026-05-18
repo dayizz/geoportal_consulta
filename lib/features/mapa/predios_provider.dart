@@ -42,6 +42,7 @@ class GeoJsonPredioFeature {
   final String id;
   final String? estatus;
   final bool esEnvolvente;
+  final bool esEstacion;
   final Map<String, dynamic> geometry;
 
   const GeoJsonPredioFeature({
@@ -49,6 +50,7 @@ class GeoJsonPredioFeature {
     required this.geometry,
     this.estatus,
     this.esEnvolvente = false,
+    this.esEstacion = false,
   });
 }
 
@@ -548,10 +550,19 @@ final importedGeoJsonPrediosProvider =
           final hasEnvolventeProp = props.values.any(
             (value) => value.toString().toLowerCase().contains('envolvente'),
           );
+          final hasEstacionProp = [
+            ...props.keys.map((key) => key.toString()),
+            ...props.values.map((value) => value.toString()),
+          ].any((value) {
+            final normalized = value.toLowerCase();
+            return normalized.contains('estacion') ||
+                normalized.contains('estación');
+          });
           return GeoJsonPredioFeature(
             id: (props['ID'] ?? props['fid'] ?? feature['id'] ?? '').toString(),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
             esEnvolvente: hasEnvolventeSource || hasEnvolventeProp,
+            esEstacion: hasEstacionProp,
             geometry: Map<String, dynamic>.from(
               (feature['geometry'] as Map?) ?? const <String, dynamic>{},
             ),

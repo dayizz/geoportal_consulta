@@ -216,16 +216,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final polygons = <Polygon>[];
     final importedPolygons = <Polygon>[];
     final importedPolylines = <Polyline>[];
+    final importedMarkers = <Marker>[];
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
     final markers = <Marker>[];
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
+    final importedBucketed = <String, _HeatBucket>{};
 
     // Mostrar polígonos desde el zoom inicial para evitar mapa sin geometrías visibles.
     bool shouldDrawPolygons() => _currentZoom >= 10;
-    // Renderizado selectivo de features importadas por zoom
-    bool shouldDrawImportedDetail() => _currentZoom >= 12;
+    // Las capas importadas deben permanecer visibles también a zoom lejano.
+    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 11;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -287,40 +289,61 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    // Renderizar features importadas solo si zoom lo justifica
-    if (shouldDrawImportedDetail()) {
-      for (final feature in importedGeoJsonPredios) {
-        final rings = _extractPolygons(feature.geometry);
-        final lines = _extractPolylines(feature.geometry);
-        final estatus = feature.estatus?.trim().toLowerCase();
-        final color = feature.esEnvolvente
-            ? const Color(0xFF1976D2)
-            : (estatus == 'liberado'
-                ? const Color(0xFFCDDC39)
-                : const Color(0xFFD32F2F));
+    for (final feature in importedGeoJsonPredios) {
+      final rings = _extractPolygons(feature.geometry);
+      final lines = _extractPolylines(feature.geometry);
+      final estatus = feature.estatus?.trim().toLowerCase();
+      final fillColor = feature.esEnvolvente
+          ? const Color(0xFF1976D2)
+          : (estatus == 'liberado'
+              ? const Color(0xFFCDDC39)
+              : const Color(0xFFD32F2F));
+      final borderColor = feature.esEstacion
+          ? const Color(0xFFFFD54F)
+          : fillColor.withOpacity(0.95);
+      final polygonOpacity = _currentZoom >= 12 ? 0.35 : 0.18;
+      final borderWidth = feature.esEstacion
+          ? (_currentZoom >= 11 ? 3.4 : 2.2)
+          : (_currentZoom >= 11 ? 3.0 : 1.6);
+      LatLng? markerPoint;
 
-        for (final ring in rings) {
-          if (ring.length < 3) continue;
-          importedPolygons.add(
-            Polygon(
-              points: ring,
-              color: color.withOpacity(0.35),
-              borderColor: color.withOpacity(0.95),
-              borderStrokeWidth: 3.2,
-            ),
-          );
-        }
+      for (final ring in rings) {
+        if (ring.length < 3) continue;
+        importedPolygons.add(
+          Polygon(
+            points: ring,
+            color: fillColor.withOpacity(polygonOpacity),
+            borderColor: borderColor,
+            borderStrokeWidth: borderWidth,
+          ),
+        );
+        markerPoint ??= _centroid(ring);
+      }
 
       for (final line in lines) {
         if (line.length < 2) continue;
         importedPolylines.add(
           Polyline(
             points: line,
-            strokeWidth: 2.4,
-            color: color.withOpacity(0.9),
+            strokeWidth: _currentZoom >= 11 ? 2.4 : 1.4,
+            color: borderColor.withOpacity(0.92),
           ),
         );
+        markerPoint ??= _centroid(line);
       }
+
+      if (shouldDrawImportedGroups() && markerPoint != null) {
+        _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
+      }
+    }
+
+    if (shouldDrawImportedGroups()) {
+      final mergedImportedBuckets =
+          _mergeOverlappingBuckets(importedBucketed.values.toList(), bucketSize);
+      for (final bucket in mergedImportedBuckets) {
+        importedMarkers.add(
+          _buildCountMarker(bucket.center, bucket.count, const Color(0xFFF9A825)),
+        );
       }
     }
 
@@ -398,6 +421,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
         if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
+        if (importedMarkers.isNotEmpty) MarkerLayer(markers: importedMarkers),
         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
         if (municipalPolygons.isNotEmpty) PolygonLayer(polygons: municipalPolygons),
         if (municipalPolylines.isNotEmpty)
@@ -475,20 +499,24 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Marker _buildHeatMarker(_HeatBucket bucket) {
     final color = _heatColor(bucket);
-    final size = bucket.count >= 25
+    return _buildCountMarker(bucket.center, bucket.count, color);
+  }
+
+  Marker _buildCountMarker(LatLng center, int count, Color color) {
+    final size = count >= 25
       ? 50.0
-        : bucket.count >= 10
+        : count >= 10
         ? 42.0
         : 36.0;
 
     return Marker(
-      point: bucket.center,
+      point: center,
       width: size,
       height: size,
       child: GestureDetector(
         onTap: () {
           final targetZoom = (_currentZoom + 1.2).clamp(10.0, 17.0).toDouble();
-          _mapCtrl.move(bucket.center, targetZoom);
+          _mapCtrl.move(center, targetZoom);
         },
         child: Container(
           decoration: BoxDecoration(
@@ -505,10 +533,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           ),
           child: Center(
             child: Text(
-              '${bucket.count}',
+              '$count',
               style: GoogleFonts.inter(
                 color: Colors.white,
-                fontSize: bucket.count >= 100 ? 11 : 12,
+                fontSize: count >= 100 ? 11 : 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -546,6 +574,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     existing.count = nextCount;
     if (_isLiberado(p)) existing.liberados++;
     if (_isNoLiberado(p)) existing.noLiberados++;
+    return existing;
+  }
+
+  _HeatBucket _putPointInCountBucket(
+    Map<String, _HeatBucket> buckets,
+    LatLng point,
+    double bucketSize,
+  ) {
+    final latIdx = (point.latitude / bucketSize).floor();
+    final lngIdx = (point.longitude / bucketSize).floor();
+    final key = '$latIdx:$lngIdx';
+
+    final existing = buckets[key];
+    if (existing == null) {
+      final seed = _HeatBucket(center: point, count: 1);
+      buckets[key] = seed;
+      return seed;
+    }
+
+    final nextCount = existing.count + 1;
+    existing.center = LatLng(
+      ((existing.center.latitude * existing.count) + point.latitude) / nextCount,
+      ((existing.center.longitude * existing.count) + point.longitude) /
+          nextCount,
+    );
+    existing.count = nextCount;
     return existing;
   }
 
