@@ -44,10 +44,12 @@ class GeoJsonPredioFeature {
   final bool esEnvolvente;
   final bool esEstacion;
   final Map<String, dynamic> geometry;
+  final Map<String, dynamic> properties;
 
   const GeoJsonPredioFeature({
     required this.id,
     required this.geometry,
+    required this.properties,
     this.estatus,
     this.esEnvolvente = false,
     this.esEstacion = false,
@@ -82,6 +84,24 @@ String? _inferProyecto(Predio predio) {
   }
 
   return null;
+}
+
+/// Extrae el display ID desde propiedades GeoJSON (CLAVE o NOM_SEDATU)
+String _extractDisplayId(Map<String, dynamic> properties) {
+  // Busca CLAVE
+  final clave = properties['CLAVE']?.toString().trim();
+  if (clave != null && clave.isNotEmpty && clave != 'N/D') {
+    return clave;
+  }
+  
+  // Busca NOM_SEDATU
+  final nomSedatu = properties['NOM_SEDATU']?.toString().trim();
+  if (nomSedatu != null && nomSedatu.isNotEmpty) {
+    return nomSedatu;
+  }
+  
+  // Fallback a ID o fid
+  return (properties['ID'] ?? properties['fid'] ?? 'Feature').toString();
 }
 
 /// Mapeo de municipios a estados territoriales de México
@@ -559,13 +579,14 @@ final importedGeoJsonPrediosProvider =
                 normalized.contains('estación');
           });
           return GeoJsonPredioFeature(
-            id: (props['ID'] ?? props['fid'] ?? feature['id'] ?? '').toString(),
+            id: _extractDisplayId(props),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
             esEnvolvente: hasEnvolventeSource || hasEnvolventeProp,
             esEstacion: hasEstacionProp,
             geometry: Map<String, dynamic>.from(
               (feature['geometry'] as Map?) ?? const <String, dynamic>{},
             ),
+            properties: props,
           );
         })
         .where((f) => f.geometry.isNotEmpty)

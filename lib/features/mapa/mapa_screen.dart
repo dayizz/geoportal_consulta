@@ -1383,7 +1383,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
-    final props = (feature.geometry['properties'] as Map<String, dynamic>?) ?? {};
+    final props = feature.properties;
     final clave = _getClaveFromFeature(props);
     final estatus = _getEstatusFromFeature(props);
     final segmento = _getSegmentoFromFeature(props);
@@ -1425,7 +1425,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        clave.isNotEmpty ? clave : feature.id,
+                        feature.id,
                         style: GoogleFonts.inter(
                           color: Colors.white,
                           fontSize: 15,
