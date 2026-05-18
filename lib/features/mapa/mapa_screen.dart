@@ -1480,6 +1480,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     _infoRow('Tipo de Propiedad', tipoPropiedad),
                   ],
                   const SizedBox(height: 16),
+                  // Sección de estado de gestión (checklist)
+                  _sectionTitle('Estado de Gestión'),
+                  const SizedBox(height: 8),
+                  _buildGestionChecklistForFeature(props),
+                  const SizedBox(height: 16),
                   // Banderas de clasificación
                   if (feature.esEstacion || feature.esEnvolvente) ...[
                     _sectionTitle('Clasificación'),
@@ -1593,6 +1598,123 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
     return '';
+  }
+
+  /// Verifica si la identificación está completada
+  bool _isIdentificacionComplete(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase().contains('IDENTIFICA')) {
+        return _isValueTrue(properties[key]);
+      }
+    }
+    return false;
+  }
+
+  /// Verifica si el levantamiento está completado
+  bool _isLevantamientoComplete(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase().contains('LEVANTAMIE')) {
+        return _isValueTrue(properties[key]);
+      }
+    }
+    return false;
+  }
+
+  /// Verifica si está en negociación
+  bool _isNegociacionActive(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase().contains('NEGOCIACION')) {
+        return _isValueTrue(properties[key]);
+      }
+    }
+    return false;
+  }
+
+  /// Verifica si el COP está firmado
+  bool _isCOPFirmado(Map<String, dynamic> properties) {
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('COP') || upper.contains('C.O.P')) {
+        final value = properties[key]?.toString().trim().toUpperCase() ?? '';
+        // COP está firmado si el valor es "COP", "AOP" o similar (no "NO")
+        return value == 'COP' || value == 'AOP';
+      }
+    }
+    return false;
+  }
+
+  /// Helper para determinar si un valor es "truthy"
+  bool _isValueTrue(dynamic value) {
+    if (value == null) return false;
+    final str = value.toString().trim().toUpperCase();
+    return str == 'SÍ' ||
+        str == 'SI' ||
+        str == 'YES' ||
+        str == '1' ||
+        str == 'TRUE' ||
+        str == 'COP' ||
+        str == 'AOP';
+  }
+
+  /// Widget que muestra el checklist de gestión
+  Widget _buildGestionChecklistForFeature(Map<String, dynamic> properties) {
+    final hasIdentificacion = _isIdentificacionComplete(properties);
+    final hasLevantamiento = _isLevantamientoComplete(properties);
+    final hasNegociacion = _isNegociacionActive(properties);
+    final hasCOPFirmado = _isCOPFirmado(properties);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildChecklistItem('Identificación', hasIdentificacion),
+        const SizedBox(height: 6),
+        _buildChecklistItem('Levantamiento', hasLevantamiento),
+        const SizedBox(height: 6),
+        _buildChecklistItem('Negociación', hasNegociacion),
+        const SizedBox(height: 6),
+        _buildChecklistItem('COP Firmado', hasCOPFirmado),
+      ],
+    );
+  }
+
+  /// Widget individual para un item del checklist
+  Widget _buildChecklistItem(String label, bool isChecked) {
+    return Row(
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isChecked ? Colors.green : Colors.grey[400]!,
+              width: 2,
+            ),
+            borderRadius: BorderRadius.circular(3),
+            color: isChecked ? Colors.green.withOpacity(0.1) : Colors.transparent,
+          ),
+          child: isChecked
+              ? const Icon(
+                  Icons.check,
+                  size: 14,
+                  color: Colors.green,
+                )
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: isChecked ? Colors.black87 : Colors.grey[600],
+          ),
+        ),
+      ],
+    );
   }
 
   Color _colorForStatus(String status) {
