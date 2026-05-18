@@ -489,8 +489,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
+        if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
+        if (importedPolylines.isNotEmpty)
+          PolylineLayer(polylines: importedPolylines),
+        if (importedMarkers.isNotEmpty) MarkerLayer(markers: importedMarkers),
+        if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+        if (municipalPolygons.isNotEmpty) PolygonLayer(polygons: municipalPolygons),
+        if (municipalPolylines.isNotEmpty)
+          PolylineLayer(polylines: municipalPolylines),
+        if (markers.isNotEmpty) MarkerLayer(markers: markers),
         // Etiquetas completas compatibles con la capa satelital de ArcGIS.
-        // Se combinan transporte + lugares para mostrar vialidades y toponimia.
+        // Se dibujan al final para permanecer visibles sobre capas vectoriales.
         if (_baseLayer == _BaseLayer.satelital)
           TileLayer(
             urlTemplate:
@@ -505,15 +514,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 19,
           ),
-        if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
-        if (importedPolylines.isNotEmpty)
-          PolylineLayer(polylines: importedPolylines),
-        if (importedMarkers.isNotEmpty) MarkerLayer(markers: importedMarkers),
-        if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
-        if (municipalPolygons.isNotEmpty) PolygonLayer(polygons: municipalPolygons),
-        if (municipalPolylines.isNotEmpty)
-          PolylineLayer(polylines: municipalPolylines),
-        if (markers.isNotEmpty) MarkerLayer(markers: markers),
         if (selectedFeaturePin.isNotEmpty) MarkerLayer(markers: selectedFeaturePin),
       ],
     );
