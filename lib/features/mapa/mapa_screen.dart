@@ -489,8 +489,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           userAgentPackageName: 'mx.sao.geoportal_consulta',
           maxZoom: 19,
         ),
-        // Se removio overlay de etiquetas para evitar lineas blancas y rotulos
-        // inconsistentes sobre la capa satelital.
+        // Etiquetas compatibles con la capa satelital de ArcGIS (lugares/municipios).
+        // Se usa el mismo proveedor para evitar desalineacion y nombres inconsistentes.
+        if (_baseLayer == _BaseLayer.satelital)
+          TileLayer(
+            urlTemplate:
+                'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'mx.sao.geoportal_consulta',
+            maxZoom: 19,
+          ),
         if (importedPolygons.isNotEmpty) PolygonLayer(polygons: importedPolygons),
         if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
