@@ -171,14 +171,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           ),
 
           // ─── Panel de detalle ────────────────────────────────────────────
-          if (_selectedPredio != null)
-            Positioned(
-              right: 0,
-              top: 112,
-              bottom: 0,
-              width: 320,
-              child: _buildDetailPanel(_selectedPredio!),
-            ),
           if (_selectedImportedFeature != null)
             Positioned(
               right: 0,
@@ -186,6 +178,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               bottom: 0,
               width: 320,
               child: _buildDetailPanelForImportedFeature(_selectedImportedFeature!),
+            )
+          else if (_selectedPredio != null)
+            Positioned(
+              right: 0,
+              top: 112,
+              bottom: 0,
+              width: 320,
+              child: _buildDetailPanel(_selectedPredio!),
             ),
 
           // ─── Selector de capas ──────────────────────────────────────────────
@@ -443,8 +443,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           final nonEnvolventes = importedGeoJsonPredios.where((f) => !f.esEnvolvente).toList();
           final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
           setState(() {
-            _selectedPredio = tappedPredio;
-            _selectedImportedFeature = tappedImported;
+            // Muestra solo una ficha: prioriza la última ficha implementada
+            // (GeoJSON importado) cuando ambos elementos se traslapan.
+            if (tappedImported != null) {
+              _selectedImportedFeature = tappedImported;
+              _selectedPredio = null;
+            } else {
+              _selectedPredio = tappedPredio;
+              _selectedImportedFeature = null;
+            }
           });
         },
         onPositionChanged: (position, hasGesture) {
