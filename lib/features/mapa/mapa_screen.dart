@@ -2001,6 +2001,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<Predio> _applyAllFilters(List<Predio> predios) {
+    // "Solo Estaciones" aplica a capas importadas; ocultar capa base de predios.
+    if (_filterSoloEstaciones) return const [];
+
     final liberacion = _applyLiberacionFilter(predios);
     final municipio = _selectedMunicipio;
     final withMunicipio = municipio == null
