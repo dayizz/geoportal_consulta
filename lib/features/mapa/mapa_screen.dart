@@ -235,6 +235,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
+    final showPlaceLabels = _baseLayer == _BaseLayer.satelital && _currentZoom >= 9;
+    final showStreetLabels = _baseLayer == _BaseLayer.satelital && _currentZoom >= 14;
 
     // Mostrar polígonos desde el zoom inicial para evitar mapa sin geometrías visibles.
     bool shouldDrawPolygons() => _currentZoom >= 10.8;
@@ -498,16 +500,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (municipalPolylines.isNotEmpty)
           PolylineLayer(polylines: municipalPolylines),
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
-        // Etiquetas completas compatibles con la capa satelital de ArcGIS.
-        // Se dibujan al final para permanecer visibles sobre capas vectoriales.
-        if (_baseLayer == _BaseLayer.satelital)
+        // LOD estricto para etiquetas:
+        // - Lugares/municipios/estados desde zoom medio.
+        // - Calles/avenidas solo en zoom cercano para evitar sobrecarga.
+        if (showStreetLabels)
           TileLayer(
             urlTemplate:
                 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 19,
           ),
-        if (_baseLayer == _BaseLayer.satelital)
+        if (showPlaceLabels)
           TileLayer(
             urlTemplate:
                 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
