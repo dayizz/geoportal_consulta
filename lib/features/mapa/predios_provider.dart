@@ -10,7 +10,6 @@ import '../../core/supabase/supabase_config.dart';
 import 'predio_model.dart';
 
 const _backendBaseUrl = 'http://127.0.0.1:8000';
-const _projectCodes = ['TQI', 'TSNL', 'TAP', 'TQM'];
 
 class MunicipioLimite {
   final String id;
@@ -61,28 +60,6 @@ class _MunicipioLookup {
   final List<List<LatLng>> polygons;
 
   const _MunicipioLookup({required this.nombre, required this.polygons, this.estado});
-}
-
-String? _inferProyecto(Predio predio) {
-  final directo = predio.proyecto?.trim().toUpperCase();
-  if (directo != null && _projectCodes.contains(directo)) {
-    return directo;
-  }
-
-  final contenido = [
-    predio.claveCatastral,
-    predio.ejido ?? '',
-  ].join(' ').toUpperCase();
-
-  for (final code in _projectCodes) {
-    if (contenido.contains(code)) return code;
-  }
-
-  if (predio.claveCatastral.trim().toUpperCase().startsWith('QI-')) {
-    return 'TQI';
-  }
-
-  return null;
 }
 
 /// Extrae el display ID desde propiedades GeoJSON (CLAVE o NOM_SEDATU)

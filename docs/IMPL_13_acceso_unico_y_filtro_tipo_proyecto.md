@@ -1,6 +1,6 @@
 # IMPL_13: Acceso único y filtro por tipo de proyecto
 
-**Estado**: En progreso / pendiente de despliegue final  
+**Estado**: Completado  
 **Fecha**: 2026-05-20  
 **Rama**: main
 
@@ -74,7 +74,8 @@ El requerimiento actual pide:
 - Se reemplazó el acceso por credenciales fijas.
 - Se eliminó la carga filtrada por proyecto activo.
 - Se agregó el filtro de tipo de proyecto dentro del panel avanzado.
+- Se compiló Flutter web sin errores y se publicó en `main`.
 
 ## Próximo paso
 
-Compilar, publicar y validar en producción que el login único y el filtro de tipo de proyecto funcionen correctamente.
+Validar visualmente en producción que el login único y el filtro de tipo de proyecto funcionen correctamente.
