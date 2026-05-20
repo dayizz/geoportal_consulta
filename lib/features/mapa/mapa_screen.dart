@@ -73,6 +73,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   Predio? _selectedPredio;
   GeoJsonPredioFeature? _selectedImportedFeature;
   bool _filterSoloEstaciones = false;
+  String? _selectedTipoProyecto;
   String? _selectedMunicipio;
   String? _selectedEstadoGestion;
   _ColorMode _colorMode = _ColorMode.estado;
@@ -140,7 +141,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   @override
   Widget build(BuildContext context) {
-    final proyecto = ref.watch(proyectoActivoProvider) ?? '';
     final prediosAsync = ref.watch(prediosConsultaProvider);
     final municipiosAsync = ref.watch(municipiosLimitesProvider);
     final importedGeoJsonAsync = ref.watch(importedGeoJsonPrediosProvider);
@@ -165,7 +165,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             left: 0,
             right: 0,
             child: _buildTopBar(
-              proyecto,
               prediosAsync.valueOrNull ?? [],
               municipiosAsync.valueOrNull ?? const [],
             ),
@@ -788,7 +787,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildTopBar(
-    String proyecto,
     List<Predio> predios,
     List<MunicipioLimite> municipios,
   ) {
@@ -808,6 +806,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return 'Sin clasificación';
       },
       emptyLabel: 'Sin clasificación',
+    );
+    final tipoProyectoCounts = _countByField(
+      predios,
+      (p) => _tipoProyectoLabel(p.proyecto),
+      emptyLabel: 'Sin proyecto',
     );
     final segmentoCounts = _countByField(
       liberacionFiltered,
@@ -861,7 +864,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    'Proyecto: $proyecto',
+                    'Vista única: todos los proyectos',
                     style: GoogleFonts.inter(
                       color: Colors.white,
                       fontSize: 12,
@@ -924,7 +927,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: () {
-                    ref.read(proyectoActivoProvider.notifier).state = null;
+                    ref.read(sesionActivaProvider.notifier).state = false;
                     context.go('/login');
                   },
                   icon: const Icon(Icons.logout, color: Colors.white70, size: 18),
@@ -943,6 +946,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 OutlinedButton.icon(
                   onPressed: () => _openAdvancedFiltersPanel(
                     predios,
+                    tipoProyectoCounts,
                     allMunicipioCounts,
                     clasificaCounts,
                     segmentoCounts,
@@ -982,6 +986,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Future<void> _openAdvancedFiltersPanel(
     List<Predio> predios,
+    Map<String, int> tipoProyectoCounts,
     Map<String, int> allMunicipioCounts,
     Map<String, int> clasificaCounts,
     Map<String, int> segmentoCounts,
@@ -1040,6 +1045,23 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                             ],
                           ),
                           const SizedBox(height: 8),
+                          _countSection(
+                            title: 'Tipo de proyecto',
+                            counts: tipoProyectoCounts,
+                            selectedLabel: _selectedTipoProyecto,
+                            onChipTap: (tipo) {
+                              updateFilters(() {
+                                if (_selectedTipoProyecto == tipo) {
+                                  _selectedTipoProyecto = null;
+                                } else {
+                                  _selectedTipoProyecto = tipo;
+                                }
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
                           _countSection(
                             title: 'Estatus',
                             counts: estatusCounts,
@@ -1174,6 +1196,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                                   onPressed: () => updateFilters(() {
                                     _liberacionFilter = _LiberacionFilter.todos;
                                     _segmentoQuery = '';
+                                    _selectedTipoProyecto = null;
                                     _selectedMunicipio = null;
                                     _selectedEstadoGestion = null;
                                     _selectedPredio = null;
@@ -2077,15 +2100,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     if (_filterSoloEstaciones) return const [];
 
     final liberacion = _applyLiberacionFilter(predios);
-    final municipio = _selectedMunicipio;
-    final withMunicipio = municipio == null
+    final tipoProyecto = _selectedTipoProyecto;
+    final withProyecto = tipoProyecto == null
         ? liberacion
         : liberacion.where((p) {
-      final value = (p.municipio ?? p.ejido ?? '').trim();
-      if (municipio == 'Sin municipio') return value.isEmpty;
-      final selectedKey = _normalizeMunicipioName(municipio);
-      return _normalizeMunicipioName(value) == selectedKey;
-    }).toList();
+            final label = _tipoProyectoLabel(p.proyecto);
+            return label == tipoProyecto;
+          }).toList();
+    final municipio = _selectedMunicipio;
+    final withMunicipio = municipio == null
+        ? withProyecto
+        : withProyecto.where((p) {
+            final value = (p.municipio ?? p.ejido ?? '').trim();
+            if (municipio == 'Sin municipio') return value.isEmpty;
+            final selectedKey = _normalizeMunicipioName(municipio);
+            return _normalizeMunicipioName(value) == selectedKey;
+          }).toList();
 
     final estadoSeleccionado = _selectedEstadoGestion;
     final withEstado = estadoSeleccionado == null
@@ -2102,6 +2132,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final segmento = _extractSegmentNumber(p.tramo);
       return segmento == query;
     }).toList();
+  }
+
+  String _tipoProyectoLabel(String? proyecto) {
+    final value = proyecto?.trim().toUpperCase();
+    if (value == null || value.isEmpty) return 'Sin proyecto';
+    return value;
   }
 
   List<GeoJsonPredioFeature> _applyAllImportedFilters(

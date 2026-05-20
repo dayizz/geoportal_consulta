@@ -13,25 +13,16 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _usuarioAccesoCtrl = TextEditingController();
-  final _claveAccesoCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-  bool _obscureAccess = true;
+  final _usuarioCtrl = TextEditingController();
+  final _contrasenaCtrl = TextEditingController();
   bool _obscure = true;
   String? _error;
   bool _loading = false;
 
-  static const _usuarioAccesoPermitido = 'ATTRAPI';
-  static const _claveAccesoPermitida = 'Trenes2026!';
-  static const _emailPermitido = 'admin@sao.mx';
-
   @override
   void dispose() {
-    _usuarioAccesoCtrl.dispose();
-    _claveAccesoCtrl.dispose();
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
+    _usuarioCtrl.dispose();
+    _contrasenaCtrl.dispose();
     super.dispose();
   }
 
@@ -43,37 +34,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     await Future.delayed(const Duration(milliseconds: 300));
 
-    final usuarioAcceso = _usuarioAccesoCtrl.text.trim();
-    final claveAcceso = _claveAccesoCtrl.text;
-    final email = _emailCtrl.text.trim().toLowerCase();
-    final password = _passwordCtrl.text.trim();
-    final proyecto = extraerProyecto(password);
+    final usuario = _usuarioCtrl.text.trim();
+    final contrasena = _contrasenaCtrl.text;
 
-    if (usuarioAcceso != _usuarioAccesoPermitido ||
-        claveAcceso != _claveAccesoPermitida) {
+    if (usuario != accesoUsuario || contrasena != accesoContrasena) {
       setState(() {
-        _error = 'Usuario o contraseña de acceso inválidos.';
+        _error = 'Credenciales inválidas.';
         _loading = false;
       });
       return;
     }
 
-    if (email != _emailPermitido) {
-      setState(() {
-        _error = 'Correo no autorizado.';
-        _loading = false;
-      });
-      return;
-    }
-
-    if (proyecto != null) {
-      ref.read(proyectoActivoProvider.notifier).state = proyecto;
-      if (mounted) context.go('/mapa');
-    } else {
-      setState(() {
-        _error = 'Contraseña incorrecta. Verifica tus credenciales.';
-        _loading = false;
-      });
+    ref.read(sesionActivaProvider.notifier).state = true;
+    if (mounted) {
+      context.go('/mapa');
     }
   }
 
@@ -115,7 +89,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Visualización de predios por proyecto.\nAccede con tu correo y contraseña.',
+                          'Visualización unificada de predios.\nAccede con tu usuario y contraseña.',
                         style: GoogleFonts.inter(
                           color: Colors.white.withOpacity(0.8),
                           fontSize: 16,
@@ -157,20 +131,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 8),
                       ],
-                      Text(
-                        'Ingresa tus credenciales de acceso',
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                        ),
-                        textAlign: isWide ? TextAlign.left : TextAlign.center,
-                      ),
-                      const SizedBox(height: 32),
-
                       TextFormField(
-                        controller: _usuarioAccesoCtrl,
+                        controller: _usuarioCtrl,
                         decoration: InputDecoration(
-                          labelText: 'Usuario de acceso',
+                          labelText: 'Usuario',
                           prefixIcon: const Icon(Icons.person_outline),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -181,49 +145,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       const SizedBox(height: 16),
 
                       TextFormField(
-                        controller: _claveAccesoCtrl,
-                        obscureText: _obscureAccess,
-                        decoration: InputDecoration(
-                          labelText: 'Contraseña de acceso',
-                          prefixIcon: const Icon(Icons.shield_outlined),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureAccess
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscureAccess = !_obscureAccess),
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onFieldSubmitted: (_) => _acceder(),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Campo de correo
-                      TextFormField(
-                        controller: _emailCtrl,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: InputDecoration(
-                          labelText: 'Correo electrónico',
-                          prefixIcon: const Icon(Icons.email_outlined),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onFieldSubmitted: (_) => _acceder(),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Campo de contraseña
-                      TextFormField(
-                        controller: _passwordCtrl,
+                        controller: _contrasenaCtrl,
                         obscureText: _obscure,
                         decoration: InputDecoration(
-                          labelText: 'Contraseña del proyecto',
+                          labelText: 'Contraseña',
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -241,7 +166,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Botón de acceso
                       SizedBox(
                         height: 52,
                         child: ElevatedButton(
@@ -263,7 +187,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                 )
                               : Text(
-                                  'Acceder al mapa',
+                                  'Acceder',
                                   style: GoogleFonts.inter(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,

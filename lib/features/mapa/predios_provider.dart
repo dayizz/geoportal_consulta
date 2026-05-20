@@ -7,7 +7,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/supabase/supabase_config.dart';
-import '../auth/auth_provider.dart';
 import 'predio_model.dart';
 
 const _backendBaseUrl = 'http://127.0.0.1:8000';
@@ -346,7 +345,7 @@ String? _detectEstadoFromGeometry(
   return null;
 }
 
-Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
+Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
   try {
     final raw = await rootBundle.loadString('assets/data/TSNL_16_17.geojson');
     final decoded = jsonDecode(raw);
@@ -355,7 +354,6 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
     final features = decoded['features'];
     if (features is! List) return const [];
 
-    final requestedProject = proyecto.trim().toUpperCase();
     final allPredios = <Predio>[];
     final municipiosLookup = await _loadMunicipioLookup();
 
@@ -381,7 +379,7 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
                   .toString(),
           'tramo': (props['SEGMENTO'] ?? props['segmento'] ?? '').toString(),
           'tipo_propiedad': 'PRIVADA',
-          'proyecto': (featureProject.isEmpty ? requestedProject : featureProject),
+          'proyecto': featureProject.isEmpty ? null : featureProject,
           'municipio': municipioDetectado,
           'estado': estadoDetectado,
           'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
@@ -391,10 +389,6 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
       );
     }
 
-    final byProject = allPredios
-        .where((p) => (p.proyecto ?? '').trim().toUpperCase() == requestedProject)
-        .toList();
-    if (byProject.isNotEmpty) return byProject;
     return allPredios;
   } catch (_) {
     return const [];
@@ -405,17 +399,12 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson(String proyecto) async {
 /// Retorna lista vacía si Supabase no está configurado.
 final prediosConsultaProvider =
     FutureProvider.autoDispose<List<Predio>>((ref) async {
-  final proyecto = ref.watch(proyectoActivoProvider);
-  if (proyecto == null) return [];
-
   if (!SupabaseConfig.isConfigured) {
     try {
-      final uri = Uri.parse('$_backendBaseUrl/predios').replace(
-        queryParameters: {'proyecto': proyecto},
-      );
+      final uri = Uri.parse('$_backendBaseUrl/predios');
       final response = await http.get(uri).timeout(const Duration(seconds: 2));
       if (response.statusCode != 200) {
-        return _loadPrediosFromAssetGeoJson(proyecto);
+        return _loadPrediosFromAssetGeoJson();
       }
 
       final data = jsonDecode(response.body) as List;
@@ -423,32 +412,24 @@ final prediosConsultaProvider =
           .map((e) => Predio.fromMap(e as Map<String, dynamic>))
           .toList();
 
-      if (prediosFiltrados.isNotEmpty) {
-        return prediosFiltrados;
-      }
+      if (prediosFiltrados.isNotEmpty) return prediosFiltrados;
 
-      // Fallback: si el backend devuelve vacío por filtro estricto de proyecto,
-      // recuperar todo y filtrar en cliente usando inferencia de proyecto.
       final fallbackResponse =
           await http.get(Uri.parse('$_backendBaseUrl/predios')).timeout(
                 const Duration(seconds: 2),
               );
       if (fallbackResponse.statusCode != 200) {
-        return _loadPrediosFromAssetGeoJson(proyecto);
+        return _loadPrediosFromAssetGeoJson();
       }
 
       final fallbackData = jsonDecode(fallbackResponse.body) as List;
       final allPredios = fallbackData
           .map((e) => Predio.fromMap(e as Map<String, dynamic>))
           .toList();
-
-      final inferred = allPredios
-          .where((predio) => _inferProyecto(predio) == proyecto.toUpperCase())
-          .toList();
-      if (inferred.isNotEmpty) return inferred;
-      return _loadPrediosFromAssetGeoJson(proyecto);
+      if (allPredios.isNotEmpty) return allPredios;
+      return _loadPrediosFromAssetGeoJson();
     } catch (_) {
-      return _loadPrediosFromAssetGeoJson(proyecto);
+      return _loadPrediosFromAssetGeoJson();
     }
   }
 
@@ -456,14 +437,13 @@ final prediosConsultaProvider =
   final response = await client
       .from('predios')
       .select()
-      .eq('proyecto', proyecto)
       .order('created_at');
 
     final supabasePredios = (response as List)
       .map((e) => Predio.fromMap(e as Map<String, dynamic>))
       .toList();
     if (supabasePredios.isNotEmpty) return supabasePredios;
-    return _loadPrediosFromAssetGeoJson(proyecto);
+    return _loadPrediosFromAssetGeoJson();
 });
 
 final municipiosLimitesProvider =
