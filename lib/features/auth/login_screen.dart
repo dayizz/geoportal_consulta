@@ -13,16 +13,23 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
+  final _usuarioAccesoCtrl = TextEditingController();
+  final _claveAccesoCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  bool _obscureAccess = true;
   bool _obscure = true;
   String? _error;
   bool _loading = false;
 
+  static const _usuarioAccesoPermitido = 'ATTRAPI';
+  static const _claveAccesoPermitida = 'Trenes2026!';
   static const _emailPermitido = 'admin@sao.mx';
 
   @override
   void dispose() {
+    _usuarioAccesoCtrl.dispose();
+    _claveAccesoCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -36,9 +43,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     await Future.delayed(const Duration(milliseconds: 300));
 
+    final usuarioAcceso = _usuarioAccesoCtrl.text.trim();
+    final claveAcceso = _claveAccesoCtrl.text;
     final email = _emailCtrl.text.trim().toLowerCase();
     final password = _passwordCtrl.text.trim();
     final proyecto = extraerProyecto(password);
+
+    if (usuarioAcceso != _usuarioAccesoPermitido ||
+        claveAcceso != _claveAccesoPermitida) {
+      setState(() {
+        _error = 'Usuario o contraseña de acceso inválidos.';
+        _loading = false;
+      });
+      return;
+    }
 
     if (email != _emailPermitido) {
       setState(() {
@@ -148,6 +166,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         textAlign: isWide ? TextAlign.left : TextAlign.center,
                       ),
                       const SizedBox(height: 32),
+
+                      TextFormField(
+                        controller: _usuarioAccesoCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Usuario de acceso',
+                          prefixIcon: const Icon(Icons.person_outline),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onFieldSubmitted: (_) => _acceder(),
+                      ),
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _claveAccesoCtrl,
+                        obscureText: _obscureAccess,
+                        decoration: InputDecoration(
+                          labelText: 'Contraseña de acceso',
+                          prefixIcon: const Icon(Icons.shield_outlined),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureAccess
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                            ),
+                            onPressed: () =>
+                                setState(() => _obscureAccess = !_obscureAccess),
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onFieldSubmitted: (_) => _acceder(),
+                      ),
+                      const SizedBox(height: 16),
 
                       // Campo de correo
                       TextFormField(
