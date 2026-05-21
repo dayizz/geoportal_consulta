@@ -98,20 +98,21 @@ class Predio {
     return Predio(
       id: map['id'] as String? ?? '',
       claveCatastral: map['clave_catastral'] as String? ??
-          map['id_sedatu'] as String? ?? '',
+        map['id_sedatu'] as String? ?? '',
       propietarioNombre: map['propietario_nombre'] as String?,
       tramo: (map['tramo'] ?? map['segmento'] ?? map['SEGMENTO'])?.toString() ??
-          'T1',
+        'T1',
       tipoPropiedad: map['tipo_propiedad'] as String? ?? 'PRIVADA',
-        municipio: (map['municipio'] ?? map['MUNICIPIO'])?.toString(),
+      municipio: (map['municipio'] ?? map['MUNICIPIO'])?.toString(),
       estado: (map['estado'] ?? map['ESTADO'])?.toString(),
       clasificacionAfectacion:
-          (map['clasificacion'] ??
-              map['CLASIFICACION'] ??
-              map['tipo_afectacion'] ??
-              map['TIPO_AFECTACION'])
-            ?.toString(),
-      ejido: map['ejido'] as String?,
+        (map['clasificacion'] ??
+          map['CLASIFICACION'] ??
+          map['tipo_afectacion'] ??
+          map['TIPO_AFECTACION'])
+        ?.toString(),
+      // Fix: support both 'ejido' and 'EJIDO' keys
+      ejido: (map['ejido'] ?? map['EJIDO'])?.toString(),
       kmInicio: toDouble(map['km_inicio']),
       kmFin: toDouble(map['km_fin']),
       superficie: toDouble(map['superficie']),
@@ -126,7 +127,7 @@ class Predio {
       longitud: toDouble(map['longitud']),
       geometry: geometry,
       createdAt: DateTime.tryParse(map['created_at'] as String? ?? '') ??
-          DateTime.now(),
+        DateTime.now(),
     );
   }
 

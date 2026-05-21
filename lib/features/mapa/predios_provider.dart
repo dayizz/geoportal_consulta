@@ -360,6 +360,7 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
           'municipio': municipioDetectado,
           'estado': estadoDetectado,
           'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
+          'ejido': (props['ejido'] ?? props['EJIDO'])?.toString(),
           'geometry': geometry,
           'created_at': DateTime.now().toIso8601String(),
         }),
