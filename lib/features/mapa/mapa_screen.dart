@@ -279,18 +279,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
-    // Jerarquía de capas por zoom
-    final showCountryBorders = _currentZoom <= 5;
-    final showStateBorders = _currentZoom > 5 && _currentZoom <= 10;
-    final showMunicipalBorders = _currentZoom > 10;
-    final showPlaceLabels = _baseLayer == _BaseLayer.satelital && _currentZoom > 10;
-    final showStreetLabels = _baseLayer == _BaseLayer.satelital && _currentZoom > 10;
-    final showCountryLabels = _currentZoom <= 5;
-    final showStateLabels = _currentZoom > 5 && _currentZoom <= 10;
+    // Nueva jerarquía de capas y etiquetas por zoom
+    final showContinentLabels = _currentZoom >= 0 && _currentZoom <= 3;
+    final showCountryBorders = _currentZoom >= 4 && _currentZoom <= 9;
+    final showCountryLabels = _currentZoom >= 4 && _currentZoom <= 9;
+    final showStateBorders = _currentZoom >= 4 && _currentZoom <= 9;
+    final showStateLabels = _currentZoom >= 4 && _currentZoom <= 9;
+    final showCityLabels = _currentZoom >= 10 && _currentZoom <= 14;
+    final showMetropolitanRoutes = _currentZoom >= 10 && _currentZoom <= 14;
+    final showStreetLabels = _currentZoom >= 15 && _currentZoom <= 17;
+    final showNeighborhoodLabels = _currentZoom >= 15 && _currentZoom <= 17;
+    final showExtremeDetailLabels = _currentZoom >= 18 && _currentZoom <= 23;
+    final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
-    bool shouldDrawPolygons() => _currentZoom > 10;
-    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom <= 10;
+    bool shouldDrawPolygons() => _currentZoom >= 10;
+    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 10;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -541,49 +545,57 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         TileLayer(
           urlTemplate: _getTileUrl(),
           userAgentPackageName: 'mx.sao.geoportal_consulta',
-          maxZoom: 19,
+          maxZoom: 23,
         ),
-        // Límites internacionales y nombres de países (zoom 0-5)
+        // Nivel 0-3: Vista global, nombres de continentes/planeta (solo base, sin overlays)
+        // Nivel 4-9: Países, estados, grandes cadenas montañosas y sus nombres
         if (showCountryBorders)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 19,
+            maxZoom: 23,
           ),
-        // Límites estatales y capitales (zoom 6-10)
         if (showStateBorders)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Administrative_Boundaries/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 19,
+            maxZoom: 23,
           ),
-        // Límites municipales, calles, colonias, segmentos y etiquetas (zoom 11+)
+        // Nivel 10-14: Ciudades, áreas metropolitanas, rutas, avenidas principales y nombres
         if (showMunicipalBorders && municipalPolygons.isNotEmpty)
           PolygonLayer(polygons: municipalPolygons),
         if (showMunicipalBorders && municipalPolylines.isNotEmpty)
           PolylineLayer(polylines: municipalPolylines),
         if (showMunicipalBorders && polygons.isNotEmpty)
           PolygonLayer(polygons: polygons),
-        if (showMunicipalBorders && importedPolygons.isNotEmpty)
+        // Capas importadas SIEMPRE visibles
+        if (importedPolygons.isNotEmpty)
           PolygonLayer(polygons: importedPolygons),
-        if (showMunicipalBorders && importedPolylines.isNotEmpty)
+        if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
-        if (showMunicipalBorders && importedMarkers.isNotEmpty)
+        if (importedMarkers.isNotEmpty)
           MarkerLayer(markers: importedMarkers),
         if (showMunicipalBorders && markers.isNotEmpty)
           MarkerLayer(markers: markers),
-        // Etiquetas de lugares y calles (zoom 11+)
+        // Nivel 15-17: Calles, vecindarios, colonias, parques y nombres
         if (showStreetLabels)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 19,
+            maxZoom: 23,
           ),
-        if (showPlaceLabels)
+        if (showNeighborhoodLabels)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 19,
+            maxZoom: 23,
+          ),
+        // Nivel 18-23: Detalle extremo, edificios, manzanas, entradas y nombres
+        if (showExtremeDetailLabels)
+          TileLayer(
+            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'mx.sao.geoportal_consulta',
+            maxZoom: 23,
           ),
         if (selectedFeaturePin.isNotEmpty) MarkerLayer(markers: selectedFeaturePin),
       ],
