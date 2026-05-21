@@ -1,45 +1,4 @@
-  /// Recolecta valores únicos de una propiedad de todos los predios y features importados
-  Set<String> _collectUniquePropertyValues({
-    required List<Predio> predios,
-    required List<GeoJsonPredioFeature> imported,
-    required String Function(Predio) predioSelector,
-    required String Function(Map<String, dynamic>) importedSelector,
-    String emptyLabel = 'Sin dato',
-  }) {
-    final values = <String>{};
-    for (final p in predios) {
-      final v = predioSelector(p).trim();
-      values.add(v.isEmpty ? emptyLabel : v);
-    }
-    for (final f in imported) {
-      final v = importedSelector(f.properties).trim();
-      values.add(v.isEmpty ? emptyLabel : v);
-    }
-    values.removeWhere((v) => v.isEmpty);
-    return values;
-  }
 
-  /// Recolecta conteos de valores únicos de una propiedad de todos los predios y features importados
-  Map<String, int> _countByFieldUnified({
-    required List<Predio> predios,
-    required List<GeoJsonPredioFeature> imported,
-    required String Function(Predio) predioSelector,
-    required String Function(Map<String, dynamic>) importedSelector,
-    String emptyLabel = 'Sin dato',
-  }) {
-    final counts = <String, int>{};
-    for (final p in predios) {
-      final v = predioSelector(p).trim();
-      final key = v.isEmpty ? emptyLabel : v;
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    for (final f in imported) {
-      final v = importedSelector(f.properties).trim();
-      final key = v.isEmpty ? emptyLabel : v;
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    return counts;
-  }
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -54,6 +13,49 @@ import '../auth/auth_provider.dart';
 import 'optimization_utils.dart';
 import 'predio_model.dart';
 import 'predios_provider.dart';
+
+// --- Utilidades puras fuera de la clase principal ---
+Set<String> collectUniquePropertyValues({
+  required List<Predio> predios,
+  required List<GeoJsonPredioFeature> imported,
+  required String Function(Predio) predioSelector,
+  required String Function(Map<String, dynamic>) importedSelector,
+  String emptyLabel = 'Sin dato',
+}) {
+  final values = <String>{};
+  for (final p in predios) {
+    final v = predioSelector(p).trim();
+    values.add(v.isEmpty ? emptyLabel : v);
+  }
+  for (final f in imported) {
+    final v = importedSelector(f.properties).trim();
+    values.add(v.isEmpty ? emptyLabel : v);
+  }
+  values.removeWhere((v) => v.isEmpty);
+  return values;
+}
+
+Map<String, int> countByFieldUnified({
+  required List<Predio> predios,
+  required List<GeoJsonPredioFeature> imported,
+  required String Function(Predio) predioSelector,
+  required String Function(Map<String, dynamic>) importedSelector,
+  String emptyLabel = 'Sin dato',
+}) {
+  final counts = <String, int>{};
+  for (final p in predios) {
+    final v = predioSelector(p).trim();
+    final key = v.isEmpty ? emptyLabel : v;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  for (final f in imported) {
+    final v = importedSelector(f.properties).trim();
+    final key = v.isEmpty ? emptyLabel : v;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+// --- Fin utilidades puras ---
 
 // Colores por estado de gestión
 Color _colorEstado(Predio p) {
@@ -209,6 +211,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             child: _buildTopBar(
               prediosAsync.valueOrNull ?? [],
               municipiosAsync.valueOrNull ?? const [],
+              importedGeoJsonAsync.valueOrNull ?? const [],
             ),
           ),
 
@@ -433,42 +436,45 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    final municipioSeleccionado = _selectedMunicipio;
-    if (municipioSeleccionado != null && municipioSeleccionado != 'Sin municipio') {
-      final selectedKey = _normalizeMunicipioName(municipioSeleccionado);
-      final selectedBoundaryPoints = <LatLng>[];
-      for (final municipio in municipios.where(
-        (m) => _normalizeMunicipioName(m.nombre) == selectedKey,
-      )) {
-        final rings = _extractPolygons(municipio.geometry);
-        for (final ring in rings) {
-          if (ring.length < 3) continue;
-          selectedBoundaryPoints.addAll(ring);
-          municipalPolygons.add(
-            Polygon(
-              points: ring,
-              color: const Color(0xFF42A5F5).withOpacity(0.10),
-              borderColor: Colors.transparent,
-              borderStrokeWidth: 0,
-            ),
-          );
-          municipalPolylines.add(
-            Polyline(
-              points: ring,
-              strokeWidth: 6.0,
-              color: Colors.white.withOpacity(0.55),
-            ),
-          );
-          municipalPolylines.add(
-            Polyline(
-              points: ring,
-              strokeWidth: 2.6,
-              color: const Color(0xFF0D47A1).withOpacity(0.98),
-            ),
-          );
+    // Multi-municipio: resalta todos los seleccionados
+    if (_selectedMunicipios.isNotEmpty) {
+      for (final municipioSeleccionado in _selectedMunicipios) {
+        if (municipioSeleccionado == 'Sin municipio') continue;
+        final selectedKey = _normalizeMunicipioName(municipioSeleccionado);
+        final selectedBoundaryPoints = <LatLng>[];
+        for (final municipio in municipios.where(
+          (m) => _normalizeMunicipioName(m.nombre) == selectedKey,
+        )) {
+          final rings = _extractPolygons(municipio.geometry);
+          for (final ring in rings) {
+            if (ring.length < 3) continue;
+            selectedBoundaryPoints.addAll(ring);
+            municipalPolygons.add(
+              Polygon(
+                points: ring,
+                color: const Color(0xFF42A5F5).withOpacity(0.10),
+                borderColor: Colors.transparent,
+                borderStrokeWidth: 0,
+              ),
+            );
+            municipalPolylines.add(
+              Polyline(
+                points: ring,
+                strokeWidth: 6.0,
+                color: Colors.white.withOpacity(0.55),
+              ),
+            );
+            municipalPolylines.add(
+              Polyline(
+                points: ring,
+                strokeWidth: 2.6,
+                color: const Color(0xFF0D47A1).withOpacity(0.98),
+              ),
+            );
+          }
         }
+        _focusSelectedMunicipioBoundary(selectedKey, selectedBoundaryPoints);
       }
-      _focusSelectedMunicipioBoundary(selectedKey, selectedBoundaryPoints);
     } else {
       _lastFocusedMunicipioKey = null;
     }
@@ -673,43 +679,34 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Marker _buildCountMarker(LatLng center, int count, Color color) {
     final size = count >= 25
-      ? 50.0
+        ? 50.0
         : count >= 10
-        ? 42.0
-        : 36.0;
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          // ─── Mapa ───────────────────────────────────────────────────────
-          prediosAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(child: Text('Error: $e')),
-            data: (predios) => _buildMap(
-              predios,
-              municipiosAsync.valueOrNull ?? const [],
-              importedGeoJsonAsync.valueOrNull ?? const [],
+            ? 42.0
+            : 36.0;
+    return Marker(
+      point: center,
+      width: size,
+      height: size,
+      child: Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
             ),
-          ),
-          // ─── TopBar ─────────────────────────────────────────────────────
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildTopBar(
-              prediosAsync.valueOrNull ?? [],
-              municipiosAsync.valueOrNull ?? const [],
-              importedGeoJsonAsync.valueOrNull ?? const [],
-            ),
-          ),
-            child: Text(
-              '$count',
-              style: GoogleFonts.inter(
-                color: Colors.white,
-                fontSize: count >= 100 ? 11 : 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+          ],
+        ),
+        child: Text(
+          '$count',
+          style: GoogleFonts.inter(
+            color: Colors.white,
+            fontSize: count >= 100 ? 11 : 12,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -851,31 +848,27 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildTopBar(
-    List<GeoJsonPredioFeature> importedFeatures = [];
-    if (municipios is List && municipios.isNotEmpty && municipios.last is GeoJsonPredioFeature) {
-      importedFeatures = municipios.cast<GeoJsonPredioFeature>();
-    }
-    // Si no, usa el argumento extra
-    if (importedFeatures.isEmpty && arguments.length > 2 && arguments[2] is List<GeoJsonPredioFeature>) {
-      importedFeatures = arguments[2] as List<GeoJsonPredioFeature>;
-    }
+    List<Predio> predios,
+    List<MunicipioLimite> municipios,
+    [List<GeoJsonPredioFeature> importedFeatures = const []]
+  ) {
     final liberacionFiltered = _applyLiberacionFilter(predios);
     final filteredPredios = _applyAllFilters(predios);
-    final tipoProyectoCounts = _countByFieldUnified(
+    final tipoProyectoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
     );
-    final allMunicipioCounts = _countByFieldUnified(
+    final allMunicipioCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => (p.municipio ?? p.ejido ?? ''),
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
-    final clasificaCounts = _countByFieldUnified(
+    final clasificaCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) {
@@ -887,14 +880,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getTipoPropiedadFromFeature(props),
       emptyLabel: 'Sin clasificación',
     );
-    final segmentoCounts = _countByFieldUnified(
+    final segmentoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _extractSegmentNumber(p.tramo),
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
-    final estadoGestionCounts = _countByFieldUnified(
+    final estadoGestionCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _ubicacionDetectadaLabel(p),
@@ -1037,13 +1030,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   ),
                   icon: const Icon(Icons.tune_rounded, size: 14),
                   label: Text(
-                    _segmentoQuery.isEmpty &&
-                            _selectedMunicipio == null &&
-                            _selectedEstadoGestion == null &&
-                            _liberacionFilter == _LiberacionFilter.todos &&
-                            !_filterSoloEstaciones
-                        ? 'Filtros avanzados'
-                        : 'Filtros avanzados *',
+                    _segmentoQueries.isEmpty &&
+                        _selectedMunicipios.isEmpty &&
+                        _selectedEstadoGestions.isEmpty &&
+                        _liberacionFilter == _LiberacionFilter.todos &&
+                        !_filterSoloEstaciones
+                      ? 'Filtros avanzados'
+                      : 'Filtros avanzados *',
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -1063,49 +1056,49 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
     // Unificar conteos para filtros avanzados de todos los campos relevantes
-    final segmentoCounts = _countByFieldUnified(
+    final segmentoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _extractSegmentNumber(p.tramo),
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
-    final ejidoCounts = _countByFieldUnified(
+    final ejidoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => p.ejido ?? '',
       importedSelector: (props) => (props['EJIDO'] ?? props['ejido'] ?? '').toString(),
       emptyLabel: 'Sin ejido',
     );
-    final municipioCounts = _countByFieldUnified(
+    final municipioCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => (p.municipio ?? ''),
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
-    final estadoCounts = _countByFieldUnified(
+    final estadoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => (p.estado ?? ''),
       importedSelector: (props) => _getEstadoFromFeature(props),
       emptyLabel: 'Sin estado',
     );
-    final estatusCounts = _countByFieldUnified(
+    final estatusCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => (p.estatus ?? ''),
       importedSelector: (props) => _getEstatusFromFeature(props),
       emptyLabel: 'Sin estatus',
     );
-    final tipoProyectoCounts = _countByFieldUnified(
+    final tipoProyectoCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
     );
-    final clasificaCounts = _countByFieldUnified(
+    final clasificaCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) {
@@ -1117,7 +1110,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getTipoPropiedadFromFeature(props),
       emptyLabel: 'Sin clasificación',
     );
-    final estadoGestionCounts = _countByFieldUnified(
+    final estadoGestionCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
       predioSelector: (p) => _ubicacionDetectadaLabel(p),
@@ -2245,45 +2238,46 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
     return filtered;
-    // Multi-select count section for filters
-    Widget _countSectionMulti({
-      required String title,
-      required Map<String, int> counts,
-      required Set<String> selectedLabels,
-      required ValueChanged<String> onChipTap,
-    }) {
-      final sorted = counts.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
+  }
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.inter(
-              color: Colors.white70,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
+  // Multi-select count section for filters
+  Widget _countSectionMulti({
+    required String title,
+    required Map<String, int> counts,
+    required Set<String> selectedLabels,
+    required ValueChanged<String> onChipTap,
+  }) {
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            color: Colors.white70,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: sorted
-                .map(
-                  (entry) => _countChip(
-                    entry.key,
-                    entry.value,
-                    active: selectedLabels.contains(entry.key),
-                    onTap: () => onChipTap(entry.key),
-                  ),
-                )
-                .toList(),
-          ),
-        ],
-      );
-    }
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: sorted
+              .map(
+                (entry) => _countChip(
+                  entry.key,
+                  entry.value,
+                  active: selectedLabels.contains(entry.key),
+                  onTap: () => onChipTap(entry.key),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
   }
 
   String _tipoProyectoLabel(String? proyecto) {
@@ -2322,31 +2316,29 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    final segmento = _extractSegmentNumber(_segmentoQuery);
-    if (segmento.isNotEmpty) {
+    if (_segmentoQueries.isNotEmpty) {
       filtered = filtered.where((feature) {
         final featureSegment = _extractSegmentNumber(
           _getSegmentoFromFeature(feature.properties),
         );
-        return featureSegment == segmento;
+        return _segmentoQueries.contains(featureSegment);
       }).toList();
     }
 
-    final municipio = _selectedMunicipio;
-    if (municipio != null) {
-      final selectedKey = _normalizeMunicipioName(municipio);
+    if (_selectedMunicipios.isNotEmpty) {
       filtered = filtered.where((feature) {
         final value = _getMunicipioFromFeature(feature.properties).trim();
-        if (municipio == 'Sin municipio') return value.isEmpty;
+        if (_selectedMunicipios.contains('Sin municipio') && value.isEmpty) return true;
         if (value.isEmpty) return false;
-        return _normalizeMunicipioName(value) == selectedKey;
+        final normalized = _normalizeMunicipioName(value);
+        return _selectedMunicipios.any((m) => _normalizeMunicipioName(m) == normalized);
       }).toList();
     }
 
-    final estado = _selectedEstadoGestion;
-    if (estado != null) {
+    if (_selectedEstadoGestions.isNotEmpty) {
       filtered = filtered.where((feature) {
-        return _getEstadoFromFeature(feature.properties) == estado;
+        final estado = _getEstadoFromFeature(feature.properties);
+        return _selectedEstadoGestions.contains(estado);
       }).toList();
     }
 
