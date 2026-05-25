@@ -2272,9 +2272,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
     if (_selectedEstatus.isNotEmpty) {
+      final selectedEstatusKeys =
+          _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
       filtered = filtered.where((p) {
-        final estatus = _estatusFilterLabelFromPredio(p);
-        return _selectedEstatus.contains(estatus);
+        final estatusKey =
+            _normalizeEstatusFilterLabel(_estatusFilterLabelFromPredio(p));
+        return selectedEstatusKeys.contains(estatusKey);
       }).toList();
     }
     if (_segmentoQueries.isNotEmpty) {
@@ -2381,9 +2384,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
     if (_selectedEstatus.isNotEmpty) {
+      final selectedEstatusKeys =
+          _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
       filtered = filtered.where((feature) {
-        final estatus = _estatusFilterLabelFromProperties(feature.properties);
-        return _selectedEstatus.contains(estatus);
+        final estatusKey = _normalizeEstatusFilterLabel(
+          _estatusFilterLabelFromProperties(feature.properties),
+        );
+        return selectedEstatusKeys.contains(estatusKey);
       }).toList();
     }
 
@@ -2454,8 +2461,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       if (token == null || token.isEmpty) continue;
       final n = int.tryParse(token);
       if (n == null) continue;
-      // Segmentos válidos del dataset TSN (evita capturar ruido como "A1").
-      if (n < 10 || n > 30) continue;
+      // Segmentos válidos del portal: 13 a 18.
+      if (n < 13 || n > 18) continue;
       final normalized = n.toString();
       if (unique.add(normalized)) {
         ordered.add(normalized);
@@ -2477,7 +2484,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     for (final match in matches) {
       final token = match.group(1);
       if (token == null || token.isEmpty) continue;
-      final normalized = int.parse(token).toString();
+      final parsed = int.parse(token);
+      if (parsed < 13 || parsed > 18) continue;
+      final normalized = parsed.toString();
       if (unique.add(normalized)) {
         ordered.add(normalized);
       }
@@ -2753,6 +2762,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   bool _isNoProgressStatus(String status) {
     return status.contains('sin_avance');
+  }
+
+  String _normalizeEstatusFilterLabel(String value) {
+    final compact = _normalizedStatus(value);
+    if (compact.isEmpty) return 'sin_estatus';
+    if (compact == 'liberado') return 'liberado';
+    if (compact == 'no_liberado' || compact == 'noliberado') {
+      return 'no_liberado';
+    }
+    if (_isNegotiationStatus(compact)) return 'en_negociacion';
+    if (_isNoProgressStatus(compact)) return 'sin_avance';
+    return compact;
   }
 
   String _normalizedStatus(String? value) {
