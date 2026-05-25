@@ -119,8 +119,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _filterSoloEstaciones = false;
   Set<String> _selectedTipoProyectos = {};
   Set<String> _selectedEstatus = {};
+  Set<String> _selectedEjidos = {};
+  Set<String> _selectedClasificaciones = {};
   Set<String> _selectedMunicipios = {};
-  Set<String> _selectedEstadoGestions = {};
   _ColorMode _colorMode = _ColorMode.estado;
   _LiberacionFilter _liberacionFilter = _LiberacionFilter.todos;
   _BaseLayer _baseLayer = _BaseLayer.satelital;
@@ -900,13 +901,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
-    final estadoGestionCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedFeatures,
-      predioSelector: (p) => _ubicacionDetectadaLabel(p),
-      importedSelector: (props) => _getEstadoFromFeature(props),
-      emptyLabel: 'Sin ubicacion',
-    )..removeWhere((key, _) => _isGestionStatusLabel(key));
     final estatusCounts = <String, int>{
       'Todos': predios.length + importedFeatures.length,
       'Liberados': predios.where(_isLiberado).length + importedFeatures.where(_isImportedLiberado).length,
@@ -1045,8 +1039,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   label: Text(
                     _segmentoQueries.isEmpty &&
                       _selectedEstatus.isEmpty &&
+                      _selectedEjidos.isEmpty &&
+                      _selectedClasificaciones.isEmpty &&
                         _selectedMunicipios.isEmpty &&
-                        _selectedEstadoGestions.isEmpty &&
                         _liberacionFilter == _LiberacionFilter.todos &&
                         !_filterSoloEstaciones
                       ? 'Filtros avanzados'
@@ -1091,13 +1086,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
-    final estadoCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedFeatures,
-      predioSelector: (p) => (p.estado ?? ''),
-      importedSelector: (props) => _getEstadoFromFeature(props),
-      emptyLabel: 'Sin estado',
-    );
     final estatusCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
@@ -1124,13 +1112,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getTipoPropiedadFromFeature(props),
       emptyLabel: 'Sin clasificación',
     );
-    final estadoGestionCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedFeatures,
-      predioSelector: (p) => _ubicacionDetectadaLabel(p),
-      importedSelector: (props) => _getEstadoFromFeature(props),
-      emptyLabel: 'Sin ubicacion',
-    )..removeWhere((key, _) => _isGestionStatusLabel(key));
     final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
       context: context,
@@ -1235,8 +1216,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                           _countSectionMulti(
                             title: 'Ejidos',
                             counts: ejidoCounts,
-                            selectedLabels: {},
-                            onChipTap: (_) {},
+                            selectedLabels: _selectedEjidos,
+                            onChipTap: (ejido) {
+                              updateFilters(() {
+                                if (_selectedEjidos.contains(ejido)) {
+                                  _selectedEjidos.remove(ejido);
+                                } else {
+                                  _selectedEjidos.add(ejido);
+                                }
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
                           ),
                           const SizedBox(height: 12),
                           _countSectionMulti(
@@ -1258,34 +1249,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                           ),
                           const SizedBox(height: 12),
                           _countSectionMulti(
-                            title: 'Estados',
-                            counts: estadoCounts,
-                            selectedLabels: {},
-                            onChipTap: (_) {},
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Estado/ubicacion detectada',
-                            counts: estadoGestionCounts,
-                            selectedLabels: _selectedEstadoGestions,
-                            onChipTap: (estado) {
+                            title: 'Clasificación',
+                            counts: clasificaCounts,
+                            selectedLabels: _selectedClasificaciones,
+                            onChipTap: (clasificacion) {
                               updateFilters(() {
-                                if (_selectedEstadoGestions.contains(estado)) {
-                                  _selectedEstadoGestions.remove(estado);
+                                if (_selectedClasificaciones.contains(clasificacion)) {
+                                  _selectedClasificaciones.remove(clasificacion);
                                 } else {
-                                  _selectedEstadoGestions.add(estado);
+                                  _selectedClasificaciones.add(clasificacion);
                                 }
                                 _selectedPredio = null;
                                 _selectedImportedFeature = null;
                               });
                             },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Clasificación',
-                            counts: clasificaCounts,
-                            selectedLabels: {},
-                            onChipTap: (_) {},
                           ),
                           const SizedBox(height: 12),
                           Row(
@@ -1332,8 +1309,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                                     _segmentoQueries.clear();
                                     _selectedTipoProyectos.clear();
                                     _selectedEstatus.clear();
+                                    _selectedEjidos.clear();
+                                    _selectedClasificaciones.clear();
                                     _selectedMunicipios.clear();
-                                    _selectedEstadoGestions.clear();
                                     _selectedPredio = null;
                                     _selectedImportedFeature = null;
                                     _lastFocusedMunicipioKey = null;
@@ -1380,20 +1358,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         );
       },
     );
-  }
-
-  String _ubicacionDetectadaLabel(Predio p) {
-    final estado = (p.estado ?? '').trim();
-    if (estado.isNotEmpty) {
-      return estado;
-    }
-
-    return 'Sin estado';
-  }
-
-  bool _isGestionStatusLabel(String value) {
-    final normalized = _normalizedStatus(value);
-    return normalized == 'liberado' || normalized == 'no_liberado';
   }
 
   String _liberacionFilterLabel(_LiberacionFilter filter) {
@@ -1479,28 +1443,35 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     bool active = false,
     VoidCallback? onTap,
   }) {
-    final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: active
-            ? Colors.white.withOpacity(0.95)
-            : Colors.white.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.25)),
-      ),
-      child: Text(
-        '$label ($count)',
-        overflow: TextOverflow.ellipsis,
-        style: GoogleFonts.inter(
-          color: active ? const Color(0xFF1B4332) : Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          decoration: TextDecoration.none,
+    final borderRadius = BorderRadius.circular(12);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: borderRadius,
+      child: InkWell(
+        borderRadius: borderRadius,
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: active
+                ? Colors.white.withOpacity(0.95)
+                : Colors.white.withOpacity(0.16),
+            borderRadius: borderRadius,
+            border: Border.all(color: Colors.white.withOpacity(0.25)),
+          ),
+          child: Text(
+            '$label ($count)',
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(
+              color: active ? const Color(0xFF1B4332) : Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              decoration: TextDecoration.none,
+            ),
+          ),
         ),
       ),
     );
-    if (onTap == null) return chip;
-    return GestureDetector(onTap: onTap, child: chip);
   }
 
   Widget _filterChip({
@@ -2265,12 +2236,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _selectedMunicipios.any((m) => _normalizeMunicipioName(m) == normalized);
       }).toList();
     }
-    if (_selectedEstadoGestions.isNotEmpty) {
-      filtered = filtered.where((p) {
-        final estado = _ubicacionDetectadaLabel(p);
-        return _selectedEstadoGestions.contains(estado);
-      }).toList();
-    }
     if (_selectedEstatus.isNotEmpty) {
       final selectedEstatusKeys =
           _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
@@ -2377,12 +2342,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    if (_selectedEstadoGestions.isNotEmpty) {
-      filtered = filtered.where((feature) {
-        final estado = _getEstadoFromFeature(feature.properties);
-        return _selectedEstadoGestions.contains(estado);
-      }).toList();
-    }
     if (_selectedEstatus.isNotEmpty) {
       final selectedEstatusKeys =
           _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
