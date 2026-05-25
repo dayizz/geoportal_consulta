@@ -1,10 +1,5 @@
 import json
-import os
-import glob
-
-def find_estaciones():
-    files = glob.glob('assets/data/**/*.geojson', recursive=True)
-    results = []
+[ ]
     
     for file_path in files:
         try:
