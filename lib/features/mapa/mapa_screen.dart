@@ -118,6 +118,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   GeoJsonPredioFeature? _selectedImportedFeature;
   bool _filterSoloEstaciones = false;
   Set<String> _selectedTipoProyectos = {};
+  Set<String> _selectedEstatus = {};
   Set<String> _selectedMunicipios = {};
   Set<String> _selectedEstadoGestions = {};
   _ColorMode _colorMode = _ColorMode.estado;
@@ -1043,6 +1044,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   icon: const Icon(Icons.tune_rounded, size: 14),
                   label: Text(
                     _segmentoQueries.isEmpty &&
+                      _selectedEstatus.isEmpty &&
                         _selectedMunicipios.isEmpty &&
                         _selectedEstadoGestions.isEmpty &&
                         _liberacionFilter == _LiberacionFilter.todos &&
@@ -1099,8 +1101,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final estatusCounts = countByFieldUnified(
       predios: predios,
       imported: importedFeatures,
-      predioSelector: (p) => (p.estatus ?? ''),
-      importedSelector: (props) => _getEstatusFromFeature(props),
+      predioSelector: (p) => _estatusFilterLabelFromPredio(p),
+      importedSelector: (props) => _estatusFilterLabelFromProperties(props),
       emptyLabel: 'Sin estatus',
     );
     final tipoProyectoCounts = countByFieldUnified(
@@ -1199,8 +1201,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                           _countSectionMulti(
                             title: 'Estatus',
                             counts: estatusCounts,
-                            selectedLabels: {},
-                            onChipTap: (_) {},
+                            selectedLabels: _selectedEstatus,
+                            onChipTap: (estatus) {
+                              updateFilters(() {
+                                if (_selectedEstatus.contains(estatus)) {
+                                  _selectedEstatus.remove(estatus);
+                                } else {
+                                  _selectedEstatus.add(estatus);
+                                }
+                                _selectedPredio = null;
+                                _selectedImportedFeature = null;
+                              });
+                            },
                           ),
                           const SizedBox(height: 12),
                           _countSectionMulti(
@@ -1319,6 +1331,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                                     _liberacionFilter = _LiberacionFilter.todos;
                                     _segmentoQueries.clear();
                                     _selectedTipoProyectos.clear();
+                                    _selectedEstatus.clear();
                                     _selectedMunicipios.clear();
                                     _selectedEstadoGestions.clear();
                                     _selectedPredio = null;
@@ -1835,8 +1848,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       if (key.toUpperCase() == 'ESTATUS') {
         final value = properties[key]?.toString().trim() ?? '';
         if (value.isEmpty || value.toUpperCase() == 'NONE') return '';
-        if (_normalizedStatus(value) == 'liberado') return 'Liberado';
-        if (_normalizedStatus(value).isNotEmpty) return 'No liberado';
+        final normalized = _normalizedStatus(value);
+        if (normalized == 'liberado') return 'Liberado';
+        if (normalized == 'no_liberado' || normalized == 'noliberado') {
+          return 'No liberado';
+        }
         return value;
       }
     }
@@ -2255,6 +2271,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _selectedEstadoGestions.contains(estado);
       }).toList();
     }
+    if (_selectedEstatus.isNotEmpty) {
+      filtered = filtered.where((p) {
+        final estatus = _estatusFilterLabelFromPredio(p);
+        return _selectedEstatus.contains(estatus);
+      }).toList();
+    }
     if (_segmentoQueries.isNotEmpty) {
       filtered = filtered.where((p) {
         return _matchesSegmentQuery(p.tramo);
@@ -2356,6 +2378,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       filtered = filtered.where((feature) {
         final estado = _getEstadoFromFeature(feature.properties);
         return _selectedEstadoGestions.contains(estado);
+      }).toList();
+    }
+    if (_selectedEstatus.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final estatus = _estatusFilterLabelFromProperties(feature.properties);
+        return _selectedEstatus.contains(estatus);
       }).toList();
     }
 
@@ -2674,6 +2702,57 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return _isIdentificacionComplete(feature.properties) ||
         _isLevantamientoComplete(feature.properties) ||
         _isNegociacionActive(feature.properties);
+  }
+
+  String _estatusFilterLabelFromPredio(Predio p) {
+    if (_isLiberado(p)) return 'Liberado';
+
+    final status = _normalizedStatus(p.estatus);
+    if (_isNegotiationStatus(status) || p.negociacion) {
+      return 'En negociación';
+    }
+    if (_isNoProgressStatus(status)) {
+      return 'Sin avance';
+    }
+    if (status.isNotEmpty) {
+      return 'No liberado';
+    }
+    if (p.identificacion || p.levantamiento || p.negociacion) {
+      return 'No liberado';
+    }
+    return 'Sin estatus';
+  }
+
+  String _estatusFilterLabelFromProperties(Map<String, dynamic> properties) {
+    if (_isCOPFirmado(properties)) return 'Liberado';
+
+    final status = _normalizedStatus(_getEstatusFromFeature(properties));
+    if (_isNegotiationStatus(status) || _isNegociacionActive(properties)) {
+      return 'En negociación';
+    }
+    if (_isNoProgressStatus(status)) {
+      return 'Sin avance';
+    }
+    if (status == 'liberado') {
+      return 'Liberado';
+    }
+    if (status.isNotEmpty) {
+      return 'No liberado';
+    }
+    if (_isIdentificacionComplete(properties) ||
+        _isLevantamientoComplete(properties) ||
+        _isNegociacionActive(properties)) {
+      return 'No liberado';
+    }
+    return 'Sin estatus';
+  }
+
+  bool _isNegotiationStatus(String status) {
+    return status.contains('negociacion');
+  }
+
+  bool _isNoProgressStatus(String status) {
+    return status.contains('sin_avance');
   }
 
   String _normalizedStatus(String? value) {
