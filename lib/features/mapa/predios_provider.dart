@@ -324,7 +324,7 @@ String? _detectEstadoFromGeometry(
 
 Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
   try {
-    final raw = await rootBundle.loadString('assets/data/TSNL_16_17.geojson');
+    final raw = await rootBundle.loadString('assets/data/TSN_SEG_16_17.geojson');
     final decoded = jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) return const [];
 
