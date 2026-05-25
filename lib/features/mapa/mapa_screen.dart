@@ -866,8 +866,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<MunicipioLimite> municipios,
     [List<GeoJsonPredioFeature> importedFeatures = const []]
   ) {
-    final importedOperative =
-        importedFeatures.where((f) => !f.esEnvolvente).toList();
+    final importedOperative = importedFeatures
+      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .toList();
     final liberacionFiltered = _applyLiberacionFilter(predios);
     final filteredPredios = _applyAllFilters(predios);
     final tipoProyectoCounts = countByFieldUnified(
@@ -1066,8 +1067,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<Predio> predios,
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
-    final importedOperative =
-        importedFeatures.where((f) => !f.esEnvolvente).toList();
+    final importedOperative = importedFeatures
+      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .toList();
     // Unificar conteos para filtros avanzados de todos los campos relevantes
     final segmentoCounts = countByFieldUnified(
       predios: predios,
@@ -2318,7 +2320,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       return [...soloEstaciones, ...envolventes];
     }
 
-    var filtered = nonEnvolventes;
+    // En modo normal, ocultar estaciones/servicios auxiliares.
+    var filtered = nonEnvolventes.where((f) => !f.esEstacion).toList();
 
     // Aplicar otros filtros solo si NO está "Solo Estaciones"
     if (_liberacionFilter != _LiberacionFilter.todos) {
