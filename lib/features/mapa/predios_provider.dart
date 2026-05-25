@@ -505,12 +505,10 @@ final importedGeoJsonPrediosProvider =
     }
 
     final importAssets = <String>[
-      'assets/data/TSNL_16_17.geojson',
-      'assets/data/ENVOLVENTES_P_TSNL.geojson',
-      'assets/data/ENVOLVENTES_L_TSNL.geojson',
+      'assets/data/TSN_SEG_16_17.geojson',
       'assets/data/ENVOLVENTE_COMPLETA.geojson',
-      'assets/data/SEGMENTO13_TSNL_1805.geojson',
-      'assets/data/segmento_18.geojson',
+      'assets/data/TSN_SEG_13.geojson',
+      'assets/data/TSN_SEG_18.geojson',
       'assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson',
     ];
 
