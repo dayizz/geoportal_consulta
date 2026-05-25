@@ -31,8 +31,6 @@ jobs:
         run: flutter pub get
 
 
-      - name: Copiar GeoJSON a web/assets/data
-        run: bash copy_geojson_to_web.sh
 
       - name: Build web
         run: flutter build web --release --base-href /geoportal_consulta/
