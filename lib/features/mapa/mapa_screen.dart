@@ -866,25 +866,27 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<MunicipioLimite> municipios,
     [List<GeoJsonPredioFeature> importedFeatures = const []]
   ) {
+    final importedOperative =
+        importedFeatures.where((f) => !f.esEnvolvente).toList();
     final liberacionFiltered = _applyLiberacionFilter(predios);
     final filteredPredios = _applyAllFilters(predios);
     final tipoProyectoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
     );
     final allMunicipioCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => (p.municipio ?? p.ejido ?? ''),
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
     final clasificaCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) {
         final tipo = p.tipoPropiedad.toUpperCase().trim();
         if (tipo == 'SOCIAL') return 'Pública';
@@ -896,15 +898,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
     final segmentoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => _extractSegmentNumber(p.tramo),
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
     final estatusCounts = <String, int>{
-      'Todos': predios.length + importedFeatures.length,
-      'Liberados': predios.where(_isLiberado).length + importedFeatures.where(_isImportedLiberado).length,
-      'No liberados': predios.where(_isNoLiberado).length + importedFeatures.where(_isImportedNoLiberado).length,
+      'Todos': predios.length + importedOperative.length,
+      'Liberados': predios.where(_isLiberado).length + importedOperative.where(_isImportedLiberado).length,
+      'No liberados': predios.where(_isNoLiberado).length + importedOperative.where(_isImportedNoLiberado).length,
     };
     return Container(
       height: 112,
@@ -1064,45 +1066,47 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<Predio> predios,
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
+    final importedOperative =
+        importedFeatures.where((f) => !f.esEnvolvente).toList();
     // Unificar conteos para filtros avanzados de todos los campos relevantes
     final segmentoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => _extractSegmentNumber(p.tramo),
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
     final ejidoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => p.ejido ?? '',
       importedSelector: (props) => (props['EJIDO'] ?? props['ejido'] ?? '').toString(),
       emptyLabel: 'Sin ejido',
     );
     final municipioCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => (p.municipio ?? ''),
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
     final estatusCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => _estatusFilterLabelFromPredio(p),
       importedSelector: (props) => _estatusFilterLabelFromProperties(props),
       emptyLabel: 'Sin estatus',
     );
     final tipoProyectoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
     );
     final clasificaCounts = countByFieldUnified(
       predios: predios,
-      imported: importedFeatures,
+      imported: importedOperative,
       predioSelector: (p) {
         final tipo = p.tipoPropiedad.toUpperCase().trim();
         if (tipo == 'SOCIAL') return 'Pública';
@@ -1112,7 +1116,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getTipoPropiedadFromFeature(props),
       emptyLabel: 'Sin clasificación',
     );
-    final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
+    final estacionesCount = importedOperative.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -2403,7 +2407,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     final segments = _extractSegmentTokens(raw);
     if (segments.isEmpty) return '';
-    return segments.join('-');
+    return segments.first;
   }
 
   List<String> _extractSegmentTokens(String? value) {

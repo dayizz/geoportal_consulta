@@ -377,51 +377,8 @@ Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
 /// Retorna lista vacía si Supabase no está configurado.
 final prediosConsultaProvider =
     FutureProvider.autoDispose<List<Predio>>((ref) async {
-  if (!SupabaseConfig.isConfigured) {
-    try {
-      final uri = Uri.parse('$_backendBaseUrl/predios');
-      final response = await http.get(uri).timeout(const Duration(seconds: 2));
-      if (response.statusCode != 200) {
-        return _loadPrediosFromAssetGeoJson();
-      }
-
-      final data = jsonDecode(response.body) as List;
-      final prediosFiltrados = data
-          .map((e) => Predio.fromMap(e as Map<String, dynamic>))
-          .toList();
-
-      if (prediosFiltrados.isNotEmpty) return prediosFiltrados;
-
-      final fallbackResponse =
-          await http.get(Uri.parse('$_backendBaseUrl/predios')).timeout(
-                const Duration(seconds: 2),
-              );
-      if (fallbackResponse.statusCode != 200) {
-        return _loadPrediosFromAssetGeoJson();
-      }
-
-      final fallbackData = jsonDecode(fallbackResponse.body) as List;
-      final allPredios = fallbackData
-          .map((e) => Predio.fromMap(e as Map<String, dynamic>))
-          .toList();
-      if (allPredios.isNotEmpty) return allPredios;
-      return _loadPrediosFromAssetGeoJson();
-    } catch (_) {
-      return _loadPrediosFromAssetGeoJson();
-    }
-  }
-
-  final client = Supabase.instance.client;
-  final response = await client
-      .from('predios')
-      .select()
-      .order('created_at');
-
-    final supabasePredios = (response as List)
-      .map((e) => Predio.fromMap(e as Map<String, dynamic>))
-      .toList();
-    if (supabasePredios.isNotEmpty) return supabasePredios;
-    return _loadPrediosFromAssetGeoJson();
+  // Modo archivo local: evita mezclar datos históricos de backend/Supabase.
+  return _loadPrediosFromAssetGeoJson();
 });
 
 final municipiosLimitesProvider =
