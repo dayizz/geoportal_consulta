@@ -908,8 +908,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     )..removeWhere((key, _) => _isGestionStatusLabel(key));
     final estatusCounts = <String, int>{
       'Todos': predios.length + importedFeatures.length,
-      'Liberados': predios.where(_isLiberado).length + importedFeatures.where((f) => _getEstatusFromFeature(f.properties) == 'Liberado').length,
-      'No liberados': predios.where(_isNoLiberado).length + importedFeatures.where((f) => _getEstatusFromFeature(f.properties) == 'No liberado').length,
+      'Liberados': predios.where(_isLiberado).length + importedFeatures.where(_isImportedLiberado).length,
+      'No liberados': predios.where(_isNoLiberado).length + importedFeatures.where(_isImportedNoLiberado).length,
     };
     return Container(
       height: 112,
@@ -1834,10 +1834,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     for (final key in keys) {
       if (key.toUpperCase() == 'ESTATUS') {
         final value = properties[key]?.toString().trim() ?? '';
-        // Normaliza: Liberado o No liberado
-        if (value.toUpperCase().contains('LIBERADO')) {
-          return value.toUpperCase() == 'LIBERADO' ? 'Liberado' : 'No liberado';
-        }
+        if (value.isEmpty || value.toUpperCase() == 'NONE') return '';
+        if (_normalizedStatus(value) == 'liberado') return 'Liberado';
+        if (_normalizedStatus(value).isNotEmpty) return 'No liberado';
         return value;
       }
     }
@@ -1850,9 +1849,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     for (final key in keys) {
       if (key.toUpperCase() == 'SEGMENTO') {
         final value = properties[key];
-        return value?.toString().trim() ?? '';
+        final raw = value?.toString().trim() ?? '';
+        if (raw.isNotEmpty && raw.toUpperCase() != 'NONE') return raw;
       }
     }
+
+    final clave = _getClaveFromFeature(properties);
+    final claveSegments = _extractSegmentTokensFromClave(clave);
+    if (claveSegments.isNotEmpty) {
+      return claveSegments.join('-');
+    }
+
+    final sourceAsset = (properties['__source_asset'] ?? '').toString().toLowerCase();
+    if (sourceAsset.contains('tsn_seg_16_17')) return '16-17';
+    if (sourceAsset.contains('tsn_seg_13')) return '13';
+    if (sourceAsset.contains('tsn_seg_18')) return '18';
+
     return '';
   }
 
@@ -2245,8 +2257,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     }
     if (_segmentoQueries.isNotEmpty) {
       filtered = filtered.where((p) {
-        final segmento = _extractSegmentNumber(p.tramo);
-        return _segmentoQueries.contains(segmento);
+        return _matchesSegmentQuery(p.tramo);
       }).toList();
     }
     return filtered;
@@ -2318,22 +2329,16 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     // Aplicar otros filtros solo si NO está "Solo Estaciones"
     if (_liberacionFilter != _LiberacionFilter.todos) {
       filtered = filtered.where((feature) {
-        final status = _normalizedStatus(
-          _getEstatusFromFeature(feature.properties),
-        );
         if (_liberacionFilter == _LiberacionFilter.liberados) {
-          return status == 'liberado';
+          return _isImportedLiberado(feature);
         }
-        return status == 'no_liberado';
+        return _isImportedNoLiberado(feature);
       }).toList();
     }
 
     if (_segmentoQueries.isNotEmpty) {
       filtered = filtered.where((feature) {
-        final featureSegment = _extractSegmentNumber(
-          _getSegmentoFromFeature(feature.properties),
-        );
-        return _segmentoQueries.contains(featureSegment);
+        return _matchesSegmentQuery(_getSegmentoFromFeature(feature.properties));
       }).toList();
     }
 
@@ -2402,9 +2407,61 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final raw = (value ?? '').trim();
     if (raw.isEmpty) return '';
 
-    final match = RegExp(r'\d+').firstMatch(raw);
-    if (match == null) return '';
-    return match.group(0) ?? '';
+    final segments = _extractSegmentTokens(raw);
+    if (segments.isEmpty) return '';
+    return segments.join('-');
+  }
+
+  List<String> _extractSegmentTokens(String? value) {
+    final raw = (value ?? '').trim();
+    if (raw.isEmpty) return const [];
+
+    final matches = RegExp(r'\d+').allMatches(raw);
+    if (matches.isEmpty) return const [];
+
+    final unique = <String>{};
+    final ordered = <String>[];
+    for (final match in matches) {
+      final token = match.group(0);
+      if (token == null || token.isEmpty) continue;
+      final n = int.tryParse(token);
+      if (n == null) continue;
+      // Segmentos válidos del dataset TSN (evita capturar ruido como "A1").
+      if (n < 10 || n > 30) continue;
+      final normalized = n.toString();
+      if (unique.add(normalized)) {
+        ordered.add(normalized);
+      }
+    }
+    return ordered;
+  }
+
+  List<String> _extractSegmentTokensFromClave(String? value) {
+    final raw = (value ?? '').trim().toUpperCase();
+    if (raw.isEmpty) return const [];
+
+    final matches = RegExp(r'(?:^|[-_])(?:S)?0?([1-2][0-9]|30)(?:$|[-_])')
+        .allMatches(raw);
+    if (matches.isEmpty) return const [];
+
+    final unique = <String>{};
+    final ordered = <String>[];
+    for (final match in matches) {
+      final token = match.group(1);
+      if (token == null || token.isEmpty) continue;
+      final normalized = int.parse(token).toString();
+      if (unique.add(normalized)) {
+        ordered.add(normalized);
+      }
+    }
+    return ordered;
+  }
+
+  bool _matchesSegmentQuery(String? rawSegmentValue) {
+    if (_segmentoQueries.isEmpty) return true;
+    final segments = _extractSegmentTokens(rawSegmentValue);
+    if (segments.isEmpty) return false;
+    return segments.any(_segmentoQueries.contains);
   }
 
   String _propertyLabel(String value) {
@@ -2597,9 +2654,27 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _isLiberado(Predio p) =>
       _normalizedStatus(p.estatus) == 'liberado' || p.cop;
 
-  bool _isNoLiberado(Predio p) =>
-      _normalizedStatus(p.estatus) == 'no_liberado' ||
-      (!_isLiberado(p) && (p.identificacion || p.levantamiento || p.negociacion));
+  bool _isNoLiberado(Predio p) {
+    if (_isLiberado(p)) return false;
+    final status = _normalizedStatus(p.estatus);
+    if (status.isNotEmpty) return status != 'liberado';
+    return p.identificacion || p.levantamiento || p.negociacion;
+  }
+
+  bool _isImportedLiberado(GeoJsonPredioFeature feature) {
+    final status = _normalizedStatus(_getEstatusFromFeature(feature.properties));
+    if (status == 'liberado') return true;
+    return _isCOPFirmado(feature.properties);
+  }
+
+  bool _isImportedNoLiberado(GeoJsonPredioFeature feature) {
+    if (_isImportedLiberado(feature)) return false;
+    final status = _normalizedStatus(_getEstatusFromFeature(feature.properties));
+    if (status.isNotEmpty) return status != 'liberado';
+    return _isIdentificacionComplete(feature.properties) ||
+        _isLevantamientoComplete(feature.properties) ||
+        _isNegociacionActive(feature.properties);
+  }
 
   String _normalizedStatus(String? value) {
     final raw = (value ?? '').trim().toLowerCase();

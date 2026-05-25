@@ -527,6 +527,10 @@ final importedGeoJsonPrediosProvider =
             (feature['properties'] as Map?) ?? const <String, dynamic>{},
           );
           final sourceAsset = (feature['__source_asset'] ?? '').toString().toLowerCase();
+          final propsWithMeta = <String, dynamic>{
+            ...props,
+            '__source_asset': sourceAsset,
+          };
           final hasEnvolventeSource = sourceAsset.contains('envolvente');
           final hasEnvolventeProp = props.values.any(
             (value) => value.toString().toLowerCase().contains('envolvente'),
@@ -540,7 +544,7 @@ final importedGeoJsonPrediosProvider =
             geometry: Map<String, dynamic>.from(
               (feature['geometry'] as Map?) ?? const <String, dynamic>{},
             ),
-            properties: props,
+            properties: propsWithMeta,
           );
         })
         .where((f) => f.geometry.isNotEmpty)
