@@ -296,7 +296,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
-    bool shouldDrawPolygons() => _currentZoom >= 10;
+    bool shouldDrawPolygons() => true;
     bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 10;
 
     for (final p in filteredPredios) {
