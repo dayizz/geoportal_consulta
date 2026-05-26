@@ -564,13 +564,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           final tappedImported =
             _findImportedFeatureAtPoint(point, filteredImportedGeoJson);
           setState(() {
-            // Prioriza predio para garantizar su selección cuando hay traslape.
-            if (tappedPredio != null) {
-              _selectedPredio = tappedPredio;
-              _selectedImportedFeature = null;
-            } else if (tappedImported != null) {
+            // Prioriza feature importado para mostrar la ficha enriquecida.
+            if (tappedImported != null) {
               _selectedImportedFeature = tappedImported;
               _selectedPredio = null;
+            } else if (tappedPredio != null) {
+              _selectedPredio = tappedPredio;
+              _selectedImportedFeature = null;
             } else {
               _selectedPredio = null;
               _selectedImportedFeature = null;
@@ -779,9 +779,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       );
     }
 
+    Widget spike(double angle, double size, Color color) {
+      return Transform.rotate(
+        angle: angle,
+        child: Icon(
+          Icons.navigation,
+          size: size,
+          color: color,
+        ),
+      );
+    }
+
     return Container(
-      width: 78,
-      height: 78,
+      width: 86,
+      height: 86,
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.92),
@@ -795,10 +806,21 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           Positioned(bottom: 0, child: cardinal('S')),
           Positioned(left: 0, child: cardinal('O')),
           Positioned(right: 0, child: cardinal('E')),
-          const Icon(Icons.star, color: Color(0xFF607D8B), size: 34),
-          const Positioned(
-            top: 12,
-            child: Icon(Icons.arrow_drop_up, color: Color(0xFFD32F2F), size: 18),
+          spike(0, 24, const Color(0xFFD32F2F)),
+          spike(math.pi, 24, const Color(0xFF78909C)),
+          spike(math.pi / 2, 20, const Color(0xFF90A4AE)),
+          spike(-math.pi / 2, 20, const Color(0xFF90A4AE)),
+          spike(math.pi / 4, 14, const Color(0xFFB0BEC5)),
+          spike(-math.pi / 4, 14, const Color(0xFFB0BEC5)),
+          spike(3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
+          spike(-3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Color(0xFF455A64),
+              shape: BoxShape.circle,
+            ),
           ),
         ],
       ),
