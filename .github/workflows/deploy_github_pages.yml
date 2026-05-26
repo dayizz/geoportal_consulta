@@ -30,6 +30,16 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generar manifiesto de GeoJSON
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('assets/data')
+          manifest = [f'assets/data/{path.name}' for path in sorted(root.glob('*.geojson'))]
+          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          print('\n'.join(manifest))
+          PY
 
 
       - name: Build web
@@ -39,6 +49,7 @@ jobs:
         run: |
           mkdir -p build/web/assets/data
           cp assets/data/*.geojson build/web/assets/data/
+          cp assets/data/manifest.json build/web/assets/data/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

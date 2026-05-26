@@ -322,15 +322,22 @@ String? _detectEstadoFromGeometry(
   return null;
 }
 
+Future<List<String>> _loadGeoJsonAssetManifest() async {
+  final raw = await rootBundle.loadString('assets/data/manifest.json');
+  final decoded = jsonDecode(raw);
+  if (decoded is! List) return const [];
+  return decoded
+      .whereType<String>()
+      .where((path) => path.startsWith('assets/data/') && path.endsWith('.geojson'))
+      .toList();
+}
+
 Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
   try {
     final allPredios = <Predio>[];
     final municipiosLookup = await _loadMunicipioLookup();
 
-    final assetManifest = await rootBundle.loadString('AssetManifest.json');
-    final manifestMap = jsonDecode(assetManifest) as Map<String, dynamic>;
-    final predioAssets = manifestMap.keys
-        .where((path) => path.startsWith('assets/data/') && path.endsWith('.geojson'))
+    final predioAssets = (await _loadGeoJsonAssetManifest())
         .where((path) {
           final lower = path.toLowerCase();
           return !lower.contains('municipios') &&
@@ -480,12 +487,7 @@ final importedGeoJsonPrediosProvider =
           .toList();
     }
 
-    // Buscar todos los archivos .geojson en assets/data
-    final assetManifest = await rootBundle.loadString('AssetManifest.json');
-    final manifestMap = jsonDecode(assetManifest) as Map<String, dynamic>;
-    final importAssets = manifestMap.keys
-        .where((k) => k.startsWith('assets/data/') && k.endsWith('.geojson'))
-        .toList();
+    final importAssets = await _loadGeoJsonAssetManifest();
 
     final mergedFeatures = <Map<String, dynamic>>[];
     for (final assetPath in importAssets) {
