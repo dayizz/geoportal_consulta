@@ -1944,6 +1944,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
     final props = feature.properties;
+    final displayClave = _getClaveFromFeature(props);
     final campos = <String, String>{
       'PROYECTO': _readFeatureProperty(
         props,
@@ -2096,16 +2097,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Feature GeoJSON',
-                        style: GoogleFonts.inter(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        feature.id,
+                        displayClave.isEmpty ? feature.id : displayClave,
                         style: GoogleFonts.inter(
                           color: Colors.white,
                           fontSize: 15,
