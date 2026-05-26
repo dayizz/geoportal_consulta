@@ -1026,8 +1026,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       exactKeys,
       fragmentGroups: fragmentGroups,
     );
-    if (raw.isNotEmpty) return raw;
-    return computed ? 'Sí' : '';
+    final normalized = _normalizeYesNoValue(raw);
+    if (normalized.isNotEmpty) return normalized;
+    return computed ? 'Sí' : 'No';
+  }
+
+  String _normalizeYesNoValue(dynamic value) {
+    if (value == null) return '';
+    final raw = value.toString().trim().toLowerCase();
+    if (raw.isEmpty || raw == 'none' || raw == 'null') return '';
+    if (raw == 'true' || raw == '1' || raw == 'si' || raw == 'sí' || raw == 'yes') {
+      return 'Sí';
+    }
+    if (raw == 'false' || raw == '0' || raw == 'no') {
+      return 'No';
+    }
+    return value.toString().trim();
   }
 
   Marker _buildMarker(Predio p, LatLng pos, Color color) {
@@ -1939,6 +1953,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ],
       ),
       'CLAVE': _getClaveFromFeature(props),
+      'PROPIETARIO': _readFeatureProperty(
+        props,
+        const ['PROPIETARIO', 'PROPIETARIO_NOMBRE', 'NOMBRE_PROPIETARIO'],
+        fragmentGroups: const [
+          ['PROPIE'],
+        ],
+      ),
       'SEGMENTO': _getSegmentoFromFeature(props),
       'ESTATUS': _getEstatusFromFeature(props),
       'KM INICIO': _getKmInicioFromFeature(props),
@@ -1980,6 +2001,63 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         const ['NEGOCIACION', 'NEGOCIACIÓN'],
         fragmentGroups: const [
           ['NEGOCIACION'],
+        ],
+      ),
+      'ANUENCIA': _readFeatureFlagValue(
+        props,
+        _isValueTrue(_readFeatureProperty(
+          props,
+          const ['ANUENCIA'],
+          fragmentGroups: const [
+            ['ANUENCIA'],
+          ],
+        )),
+        const ['ANUENCIA'],
+        fragmentGroups: const [
+          ['ANUENCIA'],
+        ],
+      ),
+      'TIPO DE PROPIEDAD': _getTipoPropiedadFromFeature(props),
+      'MUNICIPIO': _readFeatureProperty(
+        props,
+        const ['MUNICIPIO'],
+        fragmentGroups: const [
+          ['MUNICIPIO'],
+        ],
+      ),
+      'ESTADO': _readFeatureProperty(
+        props,
+        const ['ESTADO'],
+        fragmentGroups: const [
+          ['ESTADO'],
+        ],
+      ),
+      'ESTRUCTURA': _readFeatureProperty(
+        props,
+        const ['ESTRUCTURA'],
+        fragmentGroups: const [
+          ['ESTRUCT'],
+        ],
+      ),
+      'M2': _readFeatureProperty(
+        props,
+        const ['M2', 'SUPERFICIE'],
+        fragmentGroups: const [
+          ['SUPERFIC'],
+        ],
+      ),
+      'NUEVO': _readFeatureFlagValue(
+        props,
+        _isValueTrue(_readFeatureProperty(
+          props,
+          const ['NUEVO'],
+          fragmentGroups: const [
+            ['NUEVO'],
+          ],
+        )),
+        const ['NUEVO'],
+        fragmentGroups: const [
+          ['NUEVO'],
         ],
       ),
       'OBSERVACIONES': _readFeatureProperty(
@@ -2060,6 +2138,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   ...[
                     'PROYECTO',
                     'CLAVE',
+                    'PROPIETARIO',
                     'SEGMENTO',
                     'ESTATUS',
                     'KM INICIO',
@@ -2069,6 +2148,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     'IDENTIFICACION',
                     'LEVANTAMIENTO',
                     'NEGOCIACION',
+                    'ANUENCIA',
+                    'TIPO DE PROPIEDAD',
+                    'MUNICIPIO',
+                    'ESTADO',
+                    'ESTRUCTURA',
+                    'M2',
+                    'NUEVO',
                     'OBSERVACIONES',
                   ].map((campo) => Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2260,14 +2346,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   /// Helper para determinar si un valor es "truthy"
   bool _isValueTrue(dynamic value) {
     if (value == null) return false;
-    final str = value.toString().trim().toUpperCase();
-    return str == 'SÍ' ||
-        str == 'SI' ||
-        str == 'YES' ||
-        str == '1' ||
-        str == 'TRUE' ||
-        str == 'COP' ||
-        str == 'AOP';
+    final str = value.toString().trim().toLowerCase();
+    return str == 'sí' ||
+      str == 'si' ||
+      str == 'yes' ||
+      str == '1' ||
+      str == 'true' ||
+      str == 'cop' ||
+      str == 'aop';
   }
 
   /// Widget que muestra el checklist de gestión
