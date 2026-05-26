@@ -2369,11 +2369,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    // Eliminar duplicados de polígonos (por geometría)
+    // Eliminar duplicados exactos sin mezclar datasets diferentes.
     final unique = <String, GeoJsonPredioFeature>{};
     for (final f in [...filtered, ...envolventes]) {
+      final source = (f.properties['__source_asset'] ?? '')
+          .toString()
+          .toLowerCase()
+          .trim();
+      final typeKey = f.esEnvolvente ? 'envolvente' : 'predio';
       final geom = jsonEncode(f.geometry);
-      unique[geom] = f;
+      final dedupeKey = '$typeKey|$source|$geom';
+      unique.putIfAbsent(dedupeKey, () => f);
     }
     return unique.values.toList();
   }
