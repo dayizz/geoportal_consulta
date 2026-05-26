@@ -275,6 +275,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             bottom: 16,
             child: _buildLegend(),
           ),
+
+          if (_selectedImportedFeature == null && _selectedPredio == null)
+            Positioned(
+              top: 122,
+              right: 16,
+              child: _buildCompassRose(),
+            ),
         ],
       ),
     );
@@ -299,6 +306,16 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
+    final renderedPredioPolygonKeys = <String>{};
+    final renderedImportedPolygonKeys = <String>{};
+    const uniformFillOpacity = 0.24;
+    final importedRawPolygonKeys = <String>{};
+    for (final feature in filteredImportedGeoJson) {
+      for (final ring in _extractPolygons(feature.geometry)) {
+        if (ring.length < 3) continue;
+        importedRawPolygonKeys.add(_polygonGeometryKey(ring));
+      }
+    }
     // Nueva jerarquía de capas y etiquetas por zoom
     final showContinentLabels = _currentZoom >= 0 && _currentZoom <= 3;
     final showCountryBorders = _currentZoom >= 4 && _currentZoom <= 9;
@@ -338,9 +355,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 isPolygon: true,
               );
               if (drawCoords.length < 3) continue;
+              final rawKey = _polygonGeometryKey(coords);
+              if (importedRawPolygonKeys.contains(rawKey)) continue;
+              final drawKey = _polygonGeometryKey(drawCoords);
+              if (!renderedPredioPolygonKeys.add(drawKey)) continue;
               polygons.add(Polygon(
                 points: drawCoords,
-                color: color.withOpacity(0.35),
+                color: color.withOpacity(uniformFillOpacity),
                 borderColor: color.withOpacity(0.95),
                 borderStrokeWidth: 3.6,
               ));
@@ -397,10 +418,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         final borderColor = isStation
           ? const Color(0xFFFFD54F)
           : fillColor.withOpacity(0.95);
-      final polygonOpacity = _currentZoom >= 12 ? 0.35 : 0.18;
-        final polygonColor = isStation
-          ? Colors.transparent
-          : fillColor.withOpacity(polygonOpacity);
+        final polygonColor = fillColor.withOpacity(uniformFillOpacity);
         final borderWidth = isStation
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
           : (_currentZoom >= 11 ? 3.0 : 1.6);
@@ -414,6 +432,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: true,
         );
         if (drawRing.length < 3) continue;
+        final ringKey = _polygonGeometryKey(drawRing);
+        if (!renderedImportedPolygonKeys.add(ringKey)) continue;
         importedPolygons.add(
           Polygon(
             points: drawRing,
@@ -541,9 +561,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         initialZoom: _defaultZoom,
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          final nonEnvolventes =
-              filteredImportedGeoJson.where((f) => !f.esEnvolvente).toList();
-          final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
+          final tappedImported =
+            _findImportedFeatureAtPoint(point, filteredImportedGeoJson);
           setState(() {
             // Muestra solo una ficha: prioriza la última ficha implementada
             // (GeoJSON importado) cuando ambos elementos se traslapan.
@@ -744,6 +763,54 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildCompassRose() {
+    Widget cardinal(String label) {
+      return Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: const Color(0xFF1B4332),
+        ),
+      );
+    }
+
+    return Container(
+      width: 78,
+      height: 78,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(top: 0, child: cardinal('N')),
+          Positioned(bottom: 0, child: cardinal('S')),
+          Positioned(left: 0, child: cardinal('W')),
+          Positioned(right: 0, child: cardinal('E')),
+          Container(width: 1.5, height: 40, color: const Color(0xFF607D8B)),
+          Container(width: 40, height: 1.5, color: const Color(0xFF607D8B)),
+          const Positioned(
+            top: 10,
+            child: Icon(Icons.navigation, color: Color(0xFFD32F2F), size: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _polygonGeometryKey(List<LatLng> points) {
+    return points
+        .map(
+          (p) =>
+              '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}',
+        )
+        .join('|');
   }
 
   _HeatBucket _putInBucket(
@@ -1739,7 +1806,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               ),
               const SizedBox(width: 6),
               Text(
-                'Estación (solo borde)',
+                'Estación',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   color: Colors.grey[800],
