@@ -564,13 +564,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           final tappedImported =
             _findImportedFeatureAtPoint(point, filteredImportedGeoJson);
           setState(() {
-            // Muestra solo una ficha: prioriza la última ficha implementada
-            // (GeoJSON importado) cuando ambos elementos se traslapan.
-            if (tappedImported != null) {
+            // Prioriza predio para garantizar su selección cuando hay traslape.
+            if (tappedPredio != null) {
+              _selectedPredio = tappedPredio;
+              _selectedImportedFeature = null;
+            } else if (tappedImported != null) {
               _selectedImportedFeature = tappedImported;
               _selectedPredio = null;
             } else {
-              _selectedPredio = tappedPredio;
+              _selectedPredio = null;
               _selectedImportedFeature = null;
             }
           });
@@ -791,13 +793,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         children: [
           Positioned(top: 0, child: cardinal('N')),
           Positioned(bottom: 0, child: cardinal('S')),
-          Positioned(left: 0, child: cardinal('W')),
+          Positioned(left: 0, child: cardinal('O')),
           Positioned(right: 0, child: cardinal('E')),
-          Container(width: 1.5, height: 40, color: const Color(0xFF607D8B)),
-          Container(width: 40, height: 1.5, color: const Color(0xFF607D8B)),
+          const Icon(Icons.star, color: Color(0xFF607D8B), size: 34),
           const Positioned(
-            top: 10,
-            child: Icon(Icons.navigation, color: Color(0xFFD32F2F), size: 16),
+            top: 12,
+            child: Icon(Icons.arrow_drop_up, color: Color(0xFFD32F2F), size: 18),
           ),
         ],
       ),
@@ -1013,13 +1014,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           children: [
             Row(
               children: [
-                const Icon(Icons.map_rounded, color: Colors.white, size: 24),
+                const Icon(Icons.map_rounded, color: Colors.white, size: 28),
                 const SizedBox(width: 10),
                 Text(
                   'Geoportal de Consulta',
                   style: GoogleFonts.inter(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 18,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -2403,6 +2404,23 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _selectedMunicipios.any((m) => _normalizeMunicipioName(m) == normalized);
       }).toList();
     }
+    if (_selectedEjidos.isNotEmpty) {
+      filtered = filtered.where((p) {
+        final value = (p.ejido ?? '').trim();
+        if (_selectedEjidos.contains('Sin ejido') && value.isEmpty) return true;
+        if (value.isEmpty) return false;
+        return _selectedEjidos.contains(value);
+      }).toList();
+    }
+    if (_selectedClasificaciones.isNotEmpty) {
+      filtered = filtered.where((p) {
+        final tipo = p.tipoPropiedad.toUpperCase().trim();
+        final value = tipo == 'SOCIAL'
+            ? 'Pública'
+            : (tipo == 'PRIVADA' ? 'Privada' : 'Sin clasificación');
+        return _selectedClasificaciones.contains(value);
+      }).toList();
+    }
     if (_selectedEstatus.isNotEmpty) {
       final selectedEstatusKeys =
           _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
@@ -2563,6 +2581,36 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     if (_segmentoQueries.isNotEmpty) {
       filtered = filtered.where((feature) {
         return _matchesSegmentQuery(_getSegmentoFromFeature(feature.properties));
+      }).toList();
+    }
+
+    if (_selectedTipoProyectos.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final value = _tipoProyectoLabel(feature.properties['PROYECTO']?.toString());
+        return _selectedTipoProyectos.contains(value);
+      }).toList();
+    }
+
+    if (_selectedEjidos.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final value =
+            (feature.properties['EJIDO'] ?? feature.properties['ejido'] ?? '')
+                .toString()
+                .trim();
+        if (_selectedEjidos.contains('Sin ejido') && value.isEmpty) return true;
+        if (value.isEmpty) return false;
+        return _selectedEjidos.contains(value);
+      }).toList();
+    }
+
+    if (_selectedClasificaciones.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final tipo = _getTipoPropiedadFromFeature(feature.properties).trim();
+        final normalizedTipo = tipo.toUpperCase();
+        final value = normalizedTipo.contains('SOC')
+            ? 'Pública'
+            : (normalizedTipo.contains('PRIV') ? 'Privada' : 'Sin clasificación');
+        return _selectedClasificaciones.contains(value);
       }).toList();
     }
 
@@ -2827,29 +2875,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildFocusGeoJsonButton(List<GeoJsonPredioFeature> importedGeoJsonPredios) {
-    return Material(
-      color: Colors.white,
-      elevation: 6,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+    return Tooltip(
+      message: 'Centrar',
+      child: Material(
+        color: Colors.white,
+        elevation: 6,
         borderRadius: BorderRadius.circular(8),
-        onTap: () => _focusImportedGeoJsonNow(importedGeoJsonPredios),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.my_location_rounded, size: 18, color: Color(0xFF444444)),
-              const SizedBox(width: 6),
-              Text(
-                'Ir a GeoJSON',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF444444),
-                ),
-              ),
-            ],
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _focusImportedGeoJsonNow(importedGeoJsonPredios),
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(
+              Icons.my_location_rounded,
+              size: 18,
+              color: Color(0xFF444444),
+            ),
           ),
         ),
       ),
