@@ -324,47 +324,66 @@ String? _detectEstadoFromGeometry(
 
 Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
   try {
-    final raw = await rootBundle.loadString('assets/data/TSN_SEG_16_17.geojson');
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) return const [];
-
-    final features = decoded['features'];
-    if (features is! List) return const [];
-
     final allPredios = <Predio>[];
     final municipiosLookup = await _loadMunicipioLookup();
 
-    for (final feature in features.whereType<Map>()) {
-      final featureMap = Map<String, dynamic>.from(feature);
-      final props = Map<String, dynamic>.from(
-        (featureMap['properties'] as Map?) ?? const <String, dynamic>{},
-      );
-      final geometry = (featureMap['geometry'] as Map?) != null
-          ? Map<String, dynamic>.from(featureMap['geometry'] as Map)
-          : null;
+    final assetManifest = await rootBundle.loadString('AssetManifest.json');
+    final manifestMap = jsonDecode(assetManifest) as Map<String, dynamic>;
+    final predioAssets = manifestMap.keys
+        .where((path) => path.startsWith('assets/data/') && path.endsWith('.geojson'))
+        .where((path) {
+          final lower = path.toLowerCase();
+          return !lower.contains('municipios') &&
+              !lower.contains('envolvente') &&
+              !lower.contains('estaciones_y_edificios');
+        })
+        .toList()
+      ..sort();
 
-      final featureProject =
-          (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
+    for (final assetPath in predioAssets) {
+      final raw = await rootBundle.loadString(assetPath);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) continue;
+
+      final features = decoded['features'];
+      if (features is! List) continue;
+
+      for (final feature in features.whereType<Map>()) {
+        final featureMap = Map<String, dynamic>.from(feature);
+        final props = Map<String, dynamic>.from(
+          (featureMap['properties'] as Map?) ?? const <String, dynamic>{},
+        );
+        final geometry = (featureMap['geometry'] as Map?) != null
+            ? Map<String, dynamic>.from(featureMap['geometry'] as Map)
+            : null;
+
+        final featureProject = (props['PROYECTO'] ?? props['proyecto'] ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
         final municipioDetectado =
-          _detectMunicipioFromGeometry(geometry, municipiosLookup);
-      final estadoDetectado = _detectEstadoFromGeometry(geometry, municipiosLookup);
-      allPredios.add(
-        Predio.fromMap({
-          'id': (props['ID'] ?? props['id'] ?? allPredios.length).toString(),
-          'clave_catastral':
-              (props['CLAVE'] ?? props['clave'] ?? 'GEOJSON-${allPredios.length + 1}')
-                  .toString(),
-          'tramo': (props['SEGMENTO'] ?? props['segmento'] ?? '').toString(),
-          'tipo_propiedad': 'PRIVADA',
-          'proyecto': featureProject.isEmpty ? null : featureProject,
-          'municipio': municipioDetectado,
-          'estado': estadoDetectado,
-          'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
-          'ejido': (props['ejido'] ?? props['EJIDO'])?.toString(),
-          'geometry': geometry,
-          'created_at': DateTime.now().toIso8601String(),
-        }),
-      );
+            _detectMunicipioFromGeometry(geometry, municipiosLookup);
+        final estadoDetectado =
+            _detectEstadoFromGeometry(geometry, municipiosLookup);
+        allPredios.add(
+          Predio.fromMap({
+            'id': (props['ID'] ?? props['id'] ?? '${assetPath}_${allPredios.length}')
+                .toString(),
+            'clave_catastral':
+                (props['CLAVE'] ?? props['clave'] ?? 'GEOJSON-${allPredios.length + 1}')
+                    .toString(),
+            'tramo': (props['SEGMENTO'] ?? props['segmento'] ?? '').toString(),
+            'tipo_propiedad': 'PRIVADA',
+            'proyecto': featureProject.isEmpty ? null : featureProject,
+            'municipio': municipioDetectado,
+            'estado': estadoDetectado,
+            'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
+            'ejido': (props['ejido'] ?? props['EJIDO'])?.toString(),
+            'geometry': geometry,
+            'created_at': DateTime.now().toIso8601String(),
+          }),
+        );
+      }
     }
 
     return allPredios;
