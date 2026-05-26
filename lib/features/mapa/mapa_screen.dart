@@ -131,6 +131,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _didInitialFocus = false;
   bool _didImportedGeoJsonFocus = false;
   bool _groupingEnabled = true;
+  bool _showPredioLabels = false;
   Set<String> _segmentoQueries = {};
   String? _lastFocusedMunicipioKey;
   DateTime? _lastRefresh;
@@ -303,6 +304,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
     final markers = <Marker>[];
+    final predioLabels = <Marker>[];
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
@@ -377,6 +379,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
 
       if (markerPoint == null) continue;
+      if (_showPredioLabels) {
+        final label = p.claveCatastral.trim().isNotEmpty
+            ? p.claveCatastral.trim()
+            : p.id.trim();
+        if (label.isNotEmpty) {
+          predioLabels.add(_buildPlainTextLabelMarker(markerPoint, label));
+        }
+      }
       if (_groupingEnabled && bucketSize > 0) {
         final bucket = _putInBucket(bucketed, p, markerPoint, bucketSize);
         bucket.sample ??= p;
@@ -461,6 +471,16 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           ),
         );
         markerPoint ??= _centroid(line);
+      }
+
+      if (_showPredioLabels && markerPoint != null && !feature.esEnvolvente) {
+        final labelFromProps = _getClaveFromFeature(feature.properties).trim();
+        final label = labelFromProps.isNotEmpty
+            ? labelFromProps
+            : feature.id.trim();
+        if (label.isNotEmpty) {
+          predioLabels.add(_buildPlainTextLabelMarker(markerPoint, label));
+        }
       }
 
       if (shouldDrawImportedGroups() && markerPoint != null && !feature.esEnvolvente) {
@@ -624,6 +644,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           MarkerLayer(markers: importedMarkers),
         if (showMunicipalBorders && markers.isNotEmpty)
           MarkerLayer(markers: markers),
+        if (predioLabels.isNotEmpty)
+          MarkerLayer(markers: predioLabels),
         // Nivel 15-17: Calles, vecindarios, colonias, parques y nombres
         if (showStreetLabels)
           TileLayer(
@@ -784,6 +806,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             color: Colors.white,
             fontSize: count >= 100 ? 11 : 12,
             fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Marker _buildPlainTextLabelMarker(LatLng point, String text) {
+    return Marker(
+      point: point,
+      width: 180,
+      height: 20,
+      child: IgnorePointer(
+        child: Center(
+          child: Opacity(
+            opacity: 0.6,
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ),
       ),
@@ -1245,6 +1293,41 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   ),
                   label: Text(
                     _groupingEnabled ? 'Agrupación ON' : 'Agrupación OFF',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() => _showPredioLabels = !_showPredioLabels);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(
+                      color: _showPredioLabels
+                          ? const Color(0xFF80CBC4)
+                          : Colors.white.withOpacity(0.45),
+                    ),
+                    backgroundColor: _showPredioLabels
+                        ? const Color(0x2680CBC4)
+                        : Colors.transparent,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: Icon(
+                    _showPredioLabels
+                        ? Icons.label_important_rounded
+                        : Icons.label_outline_rounded,
+                    size: 14,
+                  ),
+                  label: Text(
+                    _showPredioLabels ? 'Etiquetas ON' : 'Etiquetas OFF',
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
