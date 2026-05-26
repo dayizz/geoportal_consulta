@@ -461,13 +461,12 @@ final importedGeoJsonPrediosProvider =
           .toList();
     }
 
-    final importAssets = <String>[
-      'assets/data/TSN_SEG_16_17.geojson',
-      'assets/data/ENVOLVENTE_COMPLETA.geojson',
-      'assets/data/TSN_SEG_13.geojson',
-      'assets/data/TSN_SEG_18.geojson',
-      'assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson',
-    ];
+    // Buscar todos los archivos .geojson en assets/data
+    final assetManifest = await rootBundle.loadString('AssetManifest.json');
+    final manifestMap = jsonDecode(assetManifest) as Map<String, dynamic>;
+    final importAssets = manifestMap.keys
+        .where((k) => k.startsWith('assets/data/') && k.endsWith('.geojson'))
+        .toList();
 
     final mergedFeatures = <Map<String, dynamic>>[];
     for (final assetPath in importAssets) {

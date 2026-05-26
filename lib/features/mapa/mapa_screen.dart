@@ -368,11 +368,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
       final estatus = feature.estatus?.trim().toLowerCase();
-      final fillColor = feature.esEnvolvente
+        final fillColor = feature.esEnvolvente
           ? const Color(0xFF1976D2)
-          : (estatus == 'liberado'
+          : (estatus == 'negociacion'
+            ? const Color(0xFFFFEB3B) // amarillo para negociacion
+            : (estatus == 'liberado'
               ? const Color(0xFFCDDC39)
-              : const Color(0xFFD32F2F));
+              : const Color(0xFFD32F2F)));
       final borderColor = feature.esEstacion
           ? const Color(0xFFFFD54F)
           : fillColor.withOpacity(0.95);
@@ -1672,12 +1674,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
     final props = feature.properties;
-    final clave = _getClaveFromFeature(props);
-    final estatus = _getEstatusFromFeature(props);
-    final segmento = _getSegmentoFromFeature(props);
-    final kmInicio = _getKmInicioFromFeature(props);
-    final kmFin = _getKmFinFromFeature(props);
-    final tipoPropiedad = _getTipoPropiedadFromFeature(props);
+    String getProp(String key) => (props[key] ?? props[key.toUpperCase()] ?? props[key.toLowerCase()] ?? '').toString();
+    String safe(String? v) => v == null ? '' : v.trim();
+    final campos = <String, String>{
+      'PROYECTO': safe(getProp('PROYECTO')),
+      'CLAVE': safe(getProp('CLAVE')),
+      'SEGMENTO': safe(getProp('SEGMENTO')),
+      'ESTATUS': safe(getProp('ESTATUS')),
+      'KM INICIO': safe(getProp('KM INICIO')),
+      'KM FIN': safe(getProp('KM FIN')),
+      'KM LINEALES': safe(getProp('KM LINEALES')),
+      'COP': safe(getProp('COP')),
+      'IDENTIFICACION': safe(getProp('IDENTIFICACION')),
+      'LEVANTAMIENTO': safe(getProp('LEVANTAMIENTO')),
+      'NEGOCIACION': safe(getProp('NEGOCIACION')),
+      'OBSERVACIONES': safe(getProp('OBSERVACIONES')),
+    };
 
     return Container(
       decoration: const BoxDecoration(
@@ -1743,31 +1755,27 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   // Sección de información principal
                   _sectionTitle('Información'),
                   const SizedBox(height: 8),
-                  if (clave.isNotEmpty)
-                    _infoRow('Clave/Clave SEDATU', clave)
-                  else
-                    _infoRow('Clave/Clave SEDATU', ''),
-                  if (estatus.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Estatus', estatus),
-                  ],
-                  if (kmInicio.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('KM Inicio', kmInicio),
-                  ],
-                  if (kmFin.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('KM Fin', kmFin),
-                  ],
-                  if (segmento.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Segmento', segmento),
-                  ],
-                  if (tipoPropiedad.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Tipo de Propiedad', tipoPropiedad),
-                  ],
-                  const SizedBox(height: 16),
+                  ...[
+                    'PROYECTO',
+                    'CLAVE',
+                    'SEGMENTO',
+                    'ESTATUS',
+                    'KM INICIO',
+                    'KM FIN',
+                    'KM LINEALES',
+                    'COP',
+                    'IDENTIFICACION',
+                    'LEVANTAMIENTO',
+                    'NEGOCIACION',
+                    'OBSERVACIONES',
+                  ].map((campo) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _infoRow(campo, campos[campo] ?? ''),
+                          const SizedBox(height: 4),
+                        ],
+                      )),
+                  const SizedBox(height: 8),
                   // Sección de estado de gestión (checklist)
                   _sectionTitle('Estado de Gestión'),
                   const SizedBox(height: 8),
@@ -2360,8 +2368,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    // Retornar: contenido filtrado + envolventes siempre visibles
-    return [...filtered, ...envolventes];
+    // Eliminar duplicados de polígonos (por geometría)
+    final unique = <String, GeoJsonPredioFeature>{};
+    for (final f in [...filtered, ...envolventes]) {
+      final geom = jsonEncode(f.geometry);
+      unique[geom] = f;
+    }
+    return unique.values.toList();
   }
 
   String _getMunicipioFromFeature(Map<String, dynamic> properties) {
