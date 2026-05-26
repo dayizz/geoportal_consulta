@@ -658,6 +658,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Predio? _findPredioAtPoint(LatLng point, List<Predio> predios) {
+    Predio? fallback;
+    double? bestDistance;
     for (final p in predios.reversed) {
       final geo = p.geometry;
       if (geo == null) continue;
@@ -667,15 +669,23 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (_isPointInPolygon(point, ring)) {
           return p;
         }
+        final distance = _distanceBetweenPoints(point, _centroid(ring));
+        if (distance <= _tapSelectionTolerance() &&
+            (bestDistance == null || distance < bestDistance)) {
+          bestDistance = distance;
+          fallback = p;
+        }
       }
     }
-    return null;
+    return fallback;
   }
 
   GeoJsonPredioFeature? _findImportedFeatureAtPoint(
     LatLng point,
     List<GeoJsonPredioFeature> features,
   ) {
+    GeoJsonPredioFeature? fallback;
+    double? bestDistance;
     for (final feature in features.reversed) {
       final polys = _extractPolygons(feature.geometry);
       for (final ring in polys) {
@@ -683,9 +693,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (_isPointInPolygon(point, ring)) {
           return feature;
         }
+        final distance = _distanceBetweenPoints(point, _centroid(ring));
+        if (distance <= _tapSelectionTolerance() &&
+            (bestDistance == null || distance < bestDistance)) {
+          bestDistance = distance;
+          fallback = feature;
+        }
       }
     }
-    return null;
+    return fallback;
+  }
+
+  double _tapSelectionTolerance() {
+    if (_currentZoom >= 16) return 0.004;
+    if (_currentZoom >= 14) return 0.006;
+    if (_currentZoom >= 12) return 0.01;
+    return 0.016;
   }
 
   bool _isPointInPolygon(LatLng point, List<LatLng> ring) {
@@ -939,6 +962,72 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final lngDelta =
         ((a.longitude - b.longitude).abs() * math.cos(avgLatRad)).abs();
     return math.sqrt((latDelta * latDelta) + (lngDelta * lngDelta));
+  }
+
+  String _compactMatch(String input) {
+    return _normalizeForMatch(input).replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  String _readFeatureProperty(
+    Map<String, dynamic> properties,
+    List<String> exactKeys, {
+    List<List<String>> fragmentGroups = const [],
+  }) {
+    final entries = properties.entries.toList();
+
+    String? readExact(String candidate) {
+      final compactCandidate = _compactMatch(candidate);
+      for (final entry in entries) {
+        if (_compactMatch(entry.key) != compactCandidate) continue;
+        final value = entry.value?.toString().trim() ?? '';
+        if (value.isNotEmpty && value.toUpperCase() != 'NONE') {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    String? readFragments(List<String> fragments) {
+      final compactFragments = fragments.map(_compactMatch).toList();
+      for (final entry in entries) {
+        final key = _compactMatch(entry.key);
+        if (!compactFragments.every((fragment) => key.contains(fragment))) {
+          continue;
+        }
+        final value = entry.value?.toString().trim() ?? '';
+        if (value.isNotEmpty && value.toUpperCase() != 'NONE') {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    for (final key in exactKeys) {
+      final value = readExact(key);
+      if (value != null) return value;
+    }
+
+    for (final fragments in fragmentGroups) {
+      final value = readFragments(fragments);
+      if (value != null) return value;
+    }
+
+    return '';
+  }
+
+  String _readFeatureFlagValue(
+    Map<String, dynamic> properties,
+    bool computed,
+    List<String> exactKeys, {
+    List<List<String>> fragmentGroups = const [],
+  }) {
+    final raw = _readFeatureProperty(
+      properties,
+      exactKeys,
+      fragmentGroups: fragmentGroups,
+    );
+    if (raw.isNotEmpty) return raw;
+    return computed ? 'Sí' : '';
   }
 
   Marker _buildMarker(Predio p, LatLng pos, Color color) {
@@ -1841,21 +1930,67 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
     final props = feature.properties;
-    String getProp(String key) => (props[key] ?? props[key.toUpperCase()] ?? props[key.toLowerCase()] ?? '').toString();
-    String safe(String? v) => v == null ? '' : v.trim();
     final campos = <String, String>{
-      'PROYECTO': safe(getProp('PROYECTO')),
-      'CLAVE': safe(getProp('CLAVE')),
-      'SEGMENTO': safe(getProp('SEGMENTO')),
-      'ESTATUS': safe(getProp('ESTATUS')),
-      'KM INICIO': safe(getProp('KM INICIO')),
-      'KM FIN': safe(getProp('KM FIN')),
-      'KM LINEALES': safe(getProp('KM LINEALES')),
-      'COP': safe(getProp('COP')),
-      'IDENTIFICACION': safe(getProp('IDENTIFICACION')),
-      'LEVANTAMIENTO': safe(getProp('LEVANTAMIENTO')),
-      'NEGOCIACION': safe(getProp('NEGOCIACION')),
-      'OBSERVACIONES': safe(getProp('OBSERVACIONES')),
+      'PROYECTO': _readFeatureProperty(
+        props,
+        const ['PROYECTO', 'PROY'],
+        fragmentGroups: const [
+          ['PROYECT'],
+        ],
+      ),
+      'CLAVE': _getClaveFromFeature(props),
+      'SEGMENTO': _getSegmentoFromFeature(props),
+      'ESTATUS': _getEstatusFromFeature(props),
+      'KM INICIO': _getKmInicioFromFeature(props),
+      'KM FIN': _getKmFinFromFeature(props),
+      'KM LINEALES': _readFeatureProperty(
+        props,
+        const ['KM LINEALES', 'KM_LINEALES', 'KMLINEALES'],
+        fragmentGroups: const [
+          ['KM', 'LINEAL'],
+        ],
+      ),
+      'COP': _readFeatureFlagValue(
+        props,
+        _isCOPFirmado(props),
+        const ['COP', 'C.O.P'],
+        fragmentGroups: const [
+          ['COP'],
+        ],
+      ),
+      'IDENTIFICACION': _readFeatureFlagValue(
+        props,
+        _isIdentificacionComplete(props),
+        const ['IDENTIFICACION', 'IDENTIFICACIÓN'],
+        fragmentGroups: const [
+          ['IDENTIFICA'],
+        ],
+      ),
+      'LEVANTAMIENTO': _readFeatureFlagValue(
+        props,
+        _isLevantamientoComplete(props),
+        const ['LEVANTAMIENTO'],
+        fragmentGroups: const [
+          ['LEVANTAMIE'],
+        ],
+      ),
+      'NEGOCIACION': _readFeatureFlagValue(
+        props,
+        _isNegociacionActive(props),
+        const ['NEGOCIACION', 'NEGOCIACIÓN'],
+        fragmentGroups: const [
+          ['NEGOCIACION'],
+        ],
+      ),
+      'OBSERVACIONES': _readFeatureProperty(
+        props,
+        const ['OBSERVACIONES', 'OBSERVACION', 'OBS', 'NOTAS', 'COMENTARIOS'],
+        fragmentGroups: const [
+          ['OBSERV'],
+          ['NOTA'],
+          ['COMENT'],
+        ],
+      ),
     };
 
     return Container(
@@ -1975,51 +2110,44 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   /// Extrae clave del feature (busca en CLAVE o NOM_SEDATU)
   String _getClaveFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    // Busca CLAVE (exacta o case-insensitive)
-    for (final key in keys) {
-      if (key.toUpperCase() == 'CLAVE') {
-        final value = properties[key];
-        return value?.toString().trim() ?? '';
-      }
-    }
-    // Busca NOM_SEDATU o variantes
-    for (final key in keys) {
-      if (key.toUpperCase().contains('SEDATU')) {
-        final value = properties[key];
-        return value?.toString().trim() ?? '';
-      }
-    }
-    return '';
+    return _readFeatureProperty(
+      properties,
+      const ['CLAVE', 'NOM_SEDATU', 'ID', 'FID'],
+      fragmentGroups: const [
+        ['SEDATU'],
+      ],
+    );
   }
 
   /// Extrae estatus (busca ESTATUS con normalización de valores)
   String _getEstatusFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    for (final key in keys) {
-      if (key.toUpperCase() == 'ESTATUS') {
-        final value = properties[key]?.toString().trim() ?? '';
-        if (value.isEmpty || value.toUpperCase() == 'NONE') return '';
-        final normalized = _normalizedStatus(value);
-        if (normalized == 'liberado') return 'Liberado';
-        if (normalized == 'no_liberado' || normalized == 'noliberado') {
-          return 'No liberado';
-        }
-        return value;
-      }
+    final value = _readFeatureProperty(
+      properties,
+      const ['ESTATUS', 'ESTADO'],
+      fragmentGroups: const [
+        ['STATUS'],
+      ],
+    );
+    if (value.isEmpty) return '';
+    final normalized = _normalizedStatus(value);
+    if (normalized == 'liberado') return 'Liberado';
+    if (normalized == 'no_liberado' || normalized == 'noliberado') {
+      return 'No liberado';
     }
-    return '';
+    return value;
   }
 
   /// Extrae segmento
   String _getSegmentoFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    for (final key in keys) {
-      if (key.toUpperCase() == 'SEGMENTO') {
-        final value = properties[key];
-        final raw = value?.toString().trim() ?? '';
-        if (raw.isNotEmpty && raw.toUpperCase() != 'NONE') return raw;
-      }
+    final raw = _readFeatureProperty(
+      properties,
+      const ['SEGMENTO', 'TRAMO'],
+      fragmentGroups: const [
+        ['SEG'],
+      ],
+    );
+    if (raw.isNotEmpty) {
+      return raw;
     }
 
     final clave = _getClaveFromFeature(properties);
@@ -2038,44 +2166,48 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   /// Extrae KM Inicio
   String _getKmInicioFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    for (final key in keys) {
-      final upper = key.toUpperCase();
-      if (upper.contains('KM') && upper.contains('INICIO')) {
-        final value = properties[key];
-        return value?.toString().trim() ?? '';
-      }
-    }
-    return '';
+    return _readFeatureProperty(
+      properties,
+      const ['KM INICIO', 'KM_INICIO', 'KMINICIO', 'INICIO KM'],
+      fragmentGroups: const [
+        ['KM', 'INICIO'],
+        ['KILOMETRO', 'INICIO'],
+      ],
+    );
   }
 
   /// Extrae KM Fin
   String _getKmFinFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    for (final key in keys) {
-      final upper = key.toUpperCase();
-      if (upper.contains('KM') && upper.contains('FIN')) {
-        final value = properties[key];
-        return value?.toString().trim() ?? '';
-      }
-    }
-    return '';
+    return _readFeatureProperty(
+      properties,
+      const ['KM FIN', 'KM_FIN', 'KMFIN', 'FIN KM'],
+      fragmentGroups: const [
+        ['KM', 'FIN'],
+        ['KILOMETRO', 'FIN'],
+      ],
+    );
   }
 
   /// Extrae tipo de propiedad (Privada o Social)
   String _getTipoPropiedadFromFeature(Map<String, dynamic> properties) {
-    final keys = properties.keys.toList();
-    for (final key in keys) {
-      final upper = key.toUpperCase();
-      if (upper.contains('TIPO') && upper.contains('PROPIEDAD')) {
-        final value = properties[key]?.toString().trim() ?? '';
-        // Normaliza a Privada o Social
-        if (value.toUpperCase().contains('PRIV')) return 'Privada';
-        if (value.toUpperCase().contains('SOC')) return 'Social';
-        return value;
-      }
-    }
-    return '';
+    final value = _readFeatureProperty(
+      properties,
+      const [
+        'TIPO PROPIEDAD',
+        'TIPO_PROPIEDAD',
+        'TIPOPROPIEDAD',
+        'CLASIFICACION',
+        'CLASIFICACIÓN',
+      ],
+      fragmentGroups: const [
+        ['TIPO', 'PROPIEDAD'],
+        ['CLASIF'],
+      ],
+    );
+    if (value.isEmpty) return '';
+    if (value.toUpperCase().contains('PRIV')) return 'Privada';
+    if (value.toUpperCase().contains('SOC')) return 'Social';
+    return value;
   }
 
   /// Verifica si la identificación está completada
