@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_provider.dart';
 import 'optimization_utils.dart';
@@ -63,7 +64,7 @@ Color _colorEstado(Predio p) {
   final estatus = p.estatus?.trim().toLowerCase();
   if (estatus == 'liberado') return const Color(0xFFCDDC39); // verde lima
   if (estatus == 'no liberado') return const Color(0xFFD32F2F); // rojo
-  if (p.negociacion) return const Color(0xFF1B5E20); // verde oscuro
+  if (p.negociacion) return const Color(0xFFFFEB3B); // amarillo
   if (p.cop) return const Color(0xFFCDDC39); // verde lima
   if (p.levantamiento) return const Color(0xFFF57F17); // ámbar
   if (p.identificacion) return const Color(0xFF1565C0); // azul
@@ -129,6 +130,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _isRefreshing = false;
   bool _didInitialFocus = false;
   bool _didImportedGeoJsonFocus = false;
+  bool _groupingEnabled = true;
   Set<String> _segmentoQueries = {};
   String? _lastFocusedMunicipioKey;
   DateTime? _lastRefresh;
@@ -143,6 +145,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   static const _defaultCenter = LatLng(20.72, -100.35);
   static const _defaultZoom = 10.0;
+  static const _groupingEnabledPrefKey = 'map.groupingEnabled';
 
   @override
   void initState() {
@@ -155,6 +158,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       duration: const Duration(milliseconds: 700),
     );
     _lastRefresh = DateTime.now();
+    _loadGroupingPreference();
   }
 
   @override
@@ -184,6 +188,19 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         _lastRefresh = DateTime.now();
       });
     }
+  }
+
+  Future<void> _loadGroupingPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedValue = prefs.getBool(_groupingEnabledPrefKey);
+    if (!mounted || savedValue == null) return;
+    setState(() => _groupingEnabled = savedValue);
+  }
+
+  Future<void> _setGroupingEnabled(bool value) async {
+    setState(() => _groupingEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_groupingEnabledPrefKey, value);
   }
 
   @override
@@ -290,14 +307,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final showStateLabels = _currentZoom >= 4 && _currentZoom <= 9;
     final showCityLabels = _currentZoom >= 10 && _currentZoom <= 14;
     final showMetropolitanRoutes = _currentZoom >= 10 && _currentZoom <= 14;
-    final showStreetLabels = _currentZoom >= 15 && _currentZoom <= 17;
-    final showNeighborhoodLabels = _currentZoom >= 15 && _currentZoom <= 17;
-    final showExtremeDetailLabels = _currentZoom >= 18 && _currentZoom <= 23;
+    final showStreetLabels = _currentZoom >= 15 && _currentZoom <= 23;
+    final showNeighborhoodLabels = _currentZoom >= 17 && _currentZoom <= 23;
     final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
     bool shouldDrawPolygons() => true;
-    bool shouldDrawImportedGroups() => bucketSize > 0 && _currentZoom < 10;
+    bool shouldDrawImportedGroups() =>
+      _groupingEnabled && bucketSize > 0 && _currentZoom < 10;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -339,13 +356,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
 
       if (markerPoint == null) continue;
-      if (bucketSize > 0) {
+      if (_groupingEnabled && bucketSize > 0) {
         final bucket = _putInBucket(bucketed, p, markerPoint, bucketSize);
         bucket.sample ??= p;
       }
     }
 
-    if (bucketSize > 0) {
+    if (_groupingEnabled && bucketSize > 0) {
       final mergedBuckets =
           _mergeOverlappingBuckets(bucketed.values.toList(), bucketSize);
       for (final bucket in mergedBuckets) {
@@ -376,11 +393,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             : (estatus == 'liberado'
               ? const Color(0xFFCDDC39)
               : const Color(0xFFD32F2F)));
-      final borderColor = feature.esEstacion
+        final isStation = _isStationFeature(feature);
+        final borderColor = isStation
           ? const Color(0xFFFFD54F)
           : fillColor.withOpacity(0.95);
       final polygonOpacity = _currentZoom >= 12 ? 0.35 : 0.18;
-      final borderWidth = feature.esEstacion
+        final polygonColor = isStation
+          ? Colors.transparent
+          : fillColor.withOpacity(polygonOpacity);
+        final borderWidth = isStation
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
           : (_currentZoom >= 11 ? 3.0 : 1.6);
       LatLng? markerPoint;
@@ -396,7 +417,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         importedPolygons.add(
           Polygon(
             points: drawRing,
-            color: fillColor.withOpacity(polygonOpacity),
+            color: polygonColor,
             borderColor: borderColor,
             borderStrokeWidth: borderWidth,
           ),
@@ -588,19 +609,14 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 23,
+            maxNativeZoom: 17,
           ),
         if (showNeighborhoodLabels)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 23,
-          ),
-        // Nivel 18-23: Detalle extremo, edificios, manzanas, entradas y nombres
-        if (showExtremeDetailLabels)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
+            maxNativeZoom: 17,
           ),
         if (selectedFeaturePin.isNotEmpty) MarkerLayer(markers: selectedFeaturePin),
       ],
@@ -870,7 +886,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     [List<GeoJsonPredioFeature> importedFeatures = const []]
   ) {
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .where((f) => !f.esEnvolvente && !_isStationFeature(f))
       .toList();
     final liberacionFiltered = _applyLiberacionFilter(predios);
     final filteredPredios = _applyAllFilters(predios);
@@ -938,23 +954,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'Vista única: todos los proyectos',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
                   ),
                 ),
                 const Spacer(),
@@ -1029,6 +1028,41 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               children: [
                 const Spacer(),
                 OutlinedButton.icon(
+                  onPressed: () async {
+                    await _setGroupingEnabled(!_groupingEnabled);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(
+                      color: _groupingEnabled
+                          ? const Color(0xFFFFD54F)
+                          : Colors.white.withOpacity(0.45),
+                    ),
+                    backgroundColor: _groupingEnabled
+                        ? const Color(0x26FFD54F)
+                        : Colors.transparent,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: Icon(
+                    _groupingEnabled
+                        ? Icons.bubble_chart_rounded
+                        : Icons.scatter_plot_outlined,
+                    size: 14,
+                  ),
+                  label: Text(
+                    _groupingEnabled ? 'Agrupación ON' : 'Agrupación OFF',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
                   onPressed: () => _openAdvancedFiltersPanel(
                     predios,
                     importedFeatures,
@@ -1071,7 +1105,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .where((f) => !f.esEnvolvente && !_isStationFeature(f))
+      .toList();
+    final importedWithEnvolventes = importedFeatures
+      .where((f) => !_isStationFeature(f))
       .toList();
     // Unificar conteos para filtros avanzados de todos los campos relevantes
     final segmentoCounts = countByFieldUnified(
@@ -1104,7 +1141,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
     final tipoProyectoCounts = countByFieldUnified(
       predios: predios,
-      imported: importedOperative,
+      imported: importedWithEnvolventes,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
@@ -1121,7 +1158,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       importedSelector: (props) => _getTipoPropiedadFromFeature(props),
       emptyLabel: 'Sin clasificación',
     );
-    final estacionesCount = importedOperative.where((f) => f.esEstacion).length;
+    final estacionesCount = predios.where(_isPredioStation).length +
+      importedFeatures
+        .where((f) => !f.esEnvolvente && _isStationFeature(f))
+        .length;
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -1348,13 +1388,25 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                             ],
                           ),
                           const SizedBox(height: 8),
-                          Text(
-                            '${_applyAllFilters(predios).length} predios visibles',
-                            style: GoogleFonts.inter(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Builder(
+                            builder: (_) {
+                              final visiblePrediosCount =
+                                  _applyAllFilters(predios).length;
+                              final visibleImportedCount = _applyAllImportedFilters(
+                                importedFeatures,
+                              ).where((f) => !f.esEnvolvente).length;
+                              final visibleTotalCount =
+                                  visiblePrediosCount + visibleImportedCount;
+
+                              return Text(
+                                '$visibleTotalCount elementos visibles',
+                                style: GoogleFonts.inter(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -1613,6 +1665,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final items = _colorMode == _ColorMode.estado
         ? [
             ('Liberado', const Color(0xFF2E7D32)),
+            ('Negociación', const Color(0xFFFFEB3B)),
             ('No liberado', const Color(0xFFD32F2F)),
             ('Sin estatus', const Color(0xFF757575)),
           ]
@@ -1667,6 +1720,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(
+                    color: const Color(0xFFFFD54F),
+                    width: 2,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Estación (solo borde)',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: Colors.grey[800],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2236,8 +2315,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<Predio> _applyAllFilters(List<Predio> predios) {
-    // "Solo Estaciones" aplica a capas importadas; ocultar capa base de predios.
-    if (_filterSoloEstaciones) return const [];
+    // "Solo Estaciones" incluye capas importadas y predios marcados como estación.
+    if (_filterSoloEstaciones) {
+      return predios.where(_isPredioStation).toList();
+    }
 
     final liberacion = _applyLiberacionFilter(predios);
     var filtered = liberacion;
@@ -2318,17 +2399,83 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return value;
   }
 
+  String _normalizeForMatch(String input) {
+    return input
+        .toLowerCase()
+        .trim()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n');
+  }
+
+  bool _isStationFeature(GeoJsonPredioFeature feature) {
+    if (feature.esEstacion) return true;
+
+    final sourceAsset =
+        _normalizeForMatch((feature.properties['__source_asset'] ?? '').toString());
+    if (sourceAsset.contains('estaciones_y_edificios') ||
+        sourceAsset.contains('estacion') ||
+        sourceAsset.contains('edificios_auxiliares') ||
+        sourceAsset.contains('edificio_auxiliar')) {
+      return true;
+    }
+
+    final estructura = _normalizeForMatch(
+      (feature.properties['ESTRUCTURA'] ?? feature.properties['estructura'] ?? '')
+          .toString(),
+    );
+    if (estructura.contains('estacion') || estructura.contains('edificio')) {
+      return true;
+    }
+
+    for (final entry in feature.properties.entries) {
+      final key = _normalizeForMatch(entry.key);
+      if (!key.contains('estructura') &&
+          !key.contains('tipo') &&
+          !key.contains('clasifica') &&
+          !key.contains('uso')) {
+        continue;
+      }
+      final value = _normalizeForMatch((entry.value ?? '').toString());
+      if (value.contains('estacion') || value.contains('edificio auxiliar')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool _isPredioStation(Predio predio) {
+    final tipo = _normalizeForMatch(predio.tipoPropiedad);
+    if (tipo.contains('estacion') || tipo.contains('edificio auxiliar')) {
+      return true;
+    }
+
+    final clasificacion =
+        _normalizeForMatch(predio.clasificacionAfectacion ?? '');
+    if (clasificacion.contains('estacion') ||
+        clasificacion.contains('edificio auxiliar')) {
+      return true;
+    }
+
+    return false;
+  }
+
   List<GeoJsonPredioFeature> _applyAllImportedFilters(
     List<GeoJsonPredioFeature> features,
   ) {
     // Separar envolventes (SIEMPRE visibles)
-    final envolventes = features.where((f) => f.esEnvolvente).toList();
+    var envolventes = features.where((f) => f.esEnvolvente).toList();
     var nonEnvolventes = features.where((f) => !f.esEnvolvente).toList();
 
     // Si Solo Estaciones está activo: SOLO estaciones (+ envolventes al final)
     if (_filterSoloEstaciones) {
       final soloEstaciones =
-          nonEnvolventes.where((f) => f.esEstacion).toList();
+          nonEnvolventes.where(_isStationFeature).toList();
       // Retornar: estaciones + envolventes siempre
       return [...soloEstaciones, ...envolventes];
     }

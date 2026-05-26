@@ -80,6 +80,50 @@ String _extractDisplayId(Map<String, dynamic> properties) {
   return (properties['ID'] ?? properties['fid'] ?? 'Feature').toString();
 }
 
+String _normalizeForMatch(String input) {
+  return input
+      .toLowerCase()
+      .trim()
+      .replaceAll('á', 'a')
+      .replaceAll('é', 'e')
+      .replaceAll('í', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ú', 'u')
+      .replaceAll('ü', 'u')
+      .replaceAll('ñ', 'n');
+}
+
+bool _isStationFeature({
+  required String sourceAsset,
+  required Map<String, dynamic> properties,
+}) {
+  final normalizedSource = _normalizeForMatch(sourceAsset);
+  if (normalizedSource.contains('estaciones_y_edificios') ||
+      normalizedSource.contains('estacion') ||
+      normalizedSource.contains('edificios_auxiliares') ||
+      normalizedSource.contains('edificio_auxiliar')) {
+    return true;
+  }
+
+  final estructura = _normalizeForMatch(
+    (properties['ESTRUCTURA'] ?? properties['estructura'] ?? '').toString(),
+  );
+  if (estructura.contains('estacion') || estructura.contains('edificio')) {
+    return true;
+  }
+
+  for (final entry in properties.entries) {
+    final key = _normalizeForMatch(entry.key);
+    if (!key.contains('estructura') && !key.contains('tipo')) continue;
+    final value = _normalizeForMatch((entry.value ?? '').toString());
+    if (value.contains('estacion') || value.contains('edificio auxiliar')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /// Mapeo de municipios a estados territoriales de México
 String? _getEstadoFromMunicipio(String? municipio) {
   if (municipio == null || municipio.isEmpty) return null;
@@ -512,7 +556,10 @@ final importedGeoJsonPrediosProvider =
           final hasEnvolventeProp = props.values.any(
             (value) => value.toString().toLowerCase().contains('envolvente'),
           );
-          final hasEstacionProp = sourceAsset.contains('estaciones_y_edificios');
+          final hasEstacionProp = _isStationFeature(
+            sourceAsset: sourceAsset,
+            properties: props,
+          );
           return GeoJsonPredioFeature(
             id: _extractDisplayId(props),
             estatus: (props['ESTATUS'] ?? props['estatus'])?.toString(),
