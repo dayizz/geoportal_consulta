@@ -790,39 +790,36 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       );
     }
 
-    return Container(
+    return SizedBox(
       width: 86,
       height: 86,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(top: 0, child: cardinal('N')),
-          Positioned(bottom: 0, child: cardinal('S')),
-          Positioned(left: 0, child: cardinal('O')),
-          Positioned(right: 0, child: cardinal('E')),
-          spike(0, 24, const Color(0xFFD32F2F)),
-          spike(math.pi, 24, const Color(0xFF78909C)),
-          spike(math.pi / 2, 20, const Color(0xFF90A4AE)),
-          spike(-math.pi / 2, 20, const Color(0xFF90A4AE)),
-          spike(math.pi / 4, 14, const Color(0xFFB0BEC5)),
-          spike(-math.pi / 4, 14, const Color(0xFFB0BEC5)),
-          spike(3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
-          spike(-3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
-          Container(
-            width: 6,
-            height: 6,
-            decoration: const BoxDecoration(
-              color: Color(0xFF455A64),
-              shape: BoxShape.circle,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(top: 0, child: cardinal('N')),
+            Positioned(bottom: 0, child: cardinal('S')),
+            Positioned(left: 0, child: cardinal('O')),
+            Positioned(right: 0, child: cardinal('E')),
+            spike(0, 24, const Color(0xFFD32F2F)),
+            spike(math.pi, 24, const Color(0xFF78909C)),
+            spike(math.pi / 2, 20, const Color(0xFF90A4AE)),
+            spike(-math.pi / 2, 20, const Color(0xFF90A4AE)),
+            spike(math.pi / 4, 14, const Color(0xFFB0BEC5)),
+            spike(-math.pi / 4, 14, const Color(0xFFB0BEC5)),
+            spike(3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
+            spike(-3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
+            Container(
+              width: 6,
+              height: 6,
+              decoration: const BoxDecoration(
+                color: Color(0xFF455A64),
+                shape: BoxShape.circle,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
