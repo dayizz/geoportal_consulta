@@ -2170,13 +2170,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }) {
     if (points.length < 8) return points;
 
-    final stride = zoom >= 13
+    // Simplificacion conservadora para evitar cortes/desaparicion al alejar.
+    final stride = isPolygon
+      ? (zoom >= 12
+        ? 1
+        : zoom >= 10
+          ? 2
+          : 3)
+      : (zoom >= 13
         ? 1
         : zoom >= 12
-            ? 2
-            : zoom >= 11
-                ? 3
-                : 5;
+          ? 2
+          : zoom >= 11
+            ? 3
+            : 5);
     if (stride <= 1) return points;
 
     final sampled = <LatLng>[];
@@ -2329,8 +2336,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       return [...soloEstaciones, ...envolventes];
     }
 
-    // En modo normal, ocultar estaciones/servicios auxiliares.
-    var filtered = nonEnvolventes.where((f) => !f.esEstacion).toList();
+    // En modo normal, mostrar todas las features no envolventes.
+    var filtered = nonEnvolventes;
 
     // Aplicar otros filtros solo si NO está "Solo Estaciones"
     if (_liberacionFilter != _LiberacionFilter.todos) {
