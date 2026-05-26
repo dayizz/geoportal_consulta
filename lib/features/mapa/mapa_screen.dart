@@ -2170,20 +2170,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }) {
     if (points.length < 8) return points;
 
-    // Simplificacion conservadora para evitar cortes/desaparicion al alejar.
-    final stride = isPolygon
-      ? (zoom >= 12
-        ? 1
-        : zoom >= 10
-          ? 2
-          : 3)
-      : (zoom >= 13
-        ? 1
-        : zoom >= 12
-          ? 2
-          : zoom >= 11
-            ? 3
-            : 5);
+    // No simplificar poligonos: evitar cortes/desaparicion de geometria al zoom out.
+    if (isPolygon) return points;
+
+    // Conserva una simplificacion leve solo en lineas para no degradar tanto el render.
+    final stride = zoom >= 13
+      ? 1
+      : zoom >= 12
+        ? 2
+        : zoom >= 11
+          ? 3
+          : 5;
     if (stride <= 1) return points;
 
     final sampled = <LatLng>[];
