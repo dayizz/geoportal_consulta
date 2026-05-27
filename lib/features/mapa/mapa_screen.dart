@@ -2960,7 +2960,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     // "Solo Estaciones" aplica a capas importadas; ocultar capa base de predios.
     if (_filterSoloEstaciones) return const [];
 
-    final liberacion = _applyLiberacionFilter(predios);
+    final prediosOperative =
+        predios.where((p) => !_isEnvolventePredio(p)).toList();
+    final liberacion = _applyLiberacionFilter(prediosOperative);
     var filtered = liberacion;
     if (_selectedTipoProyectos.isNotEmpty) {
       filtered = filtered.where((p) {
