@@ -1,5 +1,4 @@
 
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_provider.dart';
 import 'optimization_utils.dart';
@@ -64,7 +62,7 @@ Color _colorEstado(Predio p) {
   final estatus = p.estatus?.trim().toLowerCase();
   if (estatus == 'liberado') return const Color(0xFFCDDC39); // verde lima
   if (estatus == 'no liberado') return const Color(0xFFD32F2F); // rojo
-  if (p.negociacion) return const Color(0xFFFFEB3B); // amarillo
+  if (p.negociacion) return const Color(0xFF1B5E20); // verde oscuro
   if (p.cop) return const Color(0xFFCDDC39); // verde lima
   if (p.levantamiento) return const Color(0xFFF57F17); // ámbar
   if (p.identificacion) return const Color(0xFF1565C0); // azul
@@ -119,6 +117,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   Predio? _selectedPredio;
   GeoJsonPredioFeature? _selectedImportedFeature;
   bool _filterSoloEstaciones = false;
+  bool _agruparMarcadores = true;
+  bool _mostrarEtiquetas = false;
+  bool _mostrarPks = false;
   Set<String> _selectedTipoProyectos = {};
   Set<String> _selectedEstatus = {};
   Set<String> _selectedEjidos = {};
@@ -130,9 +131,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _isRefreshing = false;
   bool _didInitialFocus = false;
   bool _didImportedGeoJsonFocus = false;
-  bool _groupingEnabled = true;
-  bool _showPredioLabels = false;
-  bool _showPkLabels = false;
   Set<String> _segmentoQueries = {};
   String? _lastFocusedMunicipioKey;
   DateTime? _lastRefresh;
@@ -147,7 +145,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   static const _defaultCenter = LatLng(20.72, -100.35);
   static const _defaultZoom = 10.0;
-  static const _groupingEnabledPrefKey = 'map.groupingEnabled';
 
   @override
   void initState() {
@@ -160,7 +157,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       duration: const Duration(milliseconds: 700),
     );
     _lastRefresh = DateTime.now();
-    _loadGroupingPreference();
   }
 
   @override
@@ -192,25 +188,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     }
   }
 
-  Future<void> _loadGroupingPreference() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedValue = prefs.getBool(_groupingEnabledPrefKey);
-    if (!mounted || savedValue == null) return;
-    setState(() => _groupingEnabled = savedValue);
-  }
-
-  Future<void> _setGroupingEnabled(bool value) async {
-    setState(() => _groupingEnabled = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_groupingEnabledPrefKey, value);
-  }
-
   @override
   Widget build(BuildContext context) {
     final prediosAsync = ref.watch(prediosConsultaProvider);
     final municipiosAsync = ref.watch(municipiosLimitesProvider);
     final importedGeoJsonAsync = ref.watch(importedGeoJsonPrediosProvider);
-    final pksAsync = ref.watch(pksGeoJsonProvider);
 
     return Scaffold(
       body: Stack(
@@ -223,7 +205,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               predios,
               municipiosAsync.valueOrNull ?? const [],
               importedGeoJsonAsync.valueOrNull ?? const [],
-              pksAsync.valueOrNull ?? const [],
             ),
           ),
 
@@ -279,13 +260,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             bottom: 16,
             child: _buildLegend(),
           ),
-
-          if (_selectedImportedFeature == null && _selectedPredio == null)
-            Positioned(
-              top: 122,
-              right: 16,
-              child: _buildCompassRose(),
-            ),
         ],
       ),
     );
@@ -295,50 +269,43 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<Predio> predios,
     List<MunicipioLimite> municipios,
     List<GeoJsonPredioFeature> importedGeoJsonPredios,
-    List<PkGeoPoint> pkGeoPoints,
   ) {
+    const pkFilterEnabled = false;
     final filteredPredios = _applyAllFilters(predios);
     final filteredImportedGeoJson = _applyAllImportedFilters(importedGeoJsonPredios);
     _ensureImportedGeoJsonFocus(filteredImportedGeoJson);
     _ensureInitialFocus(predios, importedGeoJsonPredios);
     final polygons = <Polygon>[];
+    final envolventePolygons = <Polygon>[];
     final importedPolygons = <Polygon>[];
+    final envolventePolylines = <Polyline>[];
     final importedPolylines = <Polyline>[];
-    final importedMarkers = <Marker>[];
+    final importedPkMarkers = <Marker>[];
+    final importedGroupMarkers = <Marker>[];
+    final sedatuLabelMarkers = <Marker>[];
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
-    final markers = <Marker>[];
-    final predioLabels = <Marker>[];
-    final pkLabels = <Marker>[];
+    final predioGroupMarkers = <Marker>[];
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
-    final renderedPredioPolygonKeys = <String>{};
-    final renderedImportedPolygonKeys = <String>{};
-    const uniformFillOpacity = 0.24;
-    final importedRawPolygonKeys = <String>{};
-    for (final feature in filteredImportedGeoJson) {
-      for (final ring in _extractPolygons(feature.geometry)) {
-        if (ring.length < 3) continue;
-        importedRawPolygonKeys.add(_polygonGeometryKey(ring));
-      }
-    }
     // Nueva jerarquía de capas y etiquetas por zoom
-    final showContinentLabels = _currentZoom >= 0 && _currentZoom <= 3;
-    final showCountryBorders = _currentZoom >= 4 && _currentZoom <= 9;
-    final showCountryLabels = _currentZoom >= 4 && _currentZoom <= 9;
-    final showStateBorders = _currentZoom >= 4 && _currentZoom <= 9;
-    final showStateLabels = _currentZoom >= 4 && _currentZoom <= 9;
-    final showCityLabels = _currentZoom >= 10 && _currentZoom <= 14;
-    final showMetropolitanRoutes = _currentZoom >= 10 && _currentZoom <= 14;
-    final showStreetLabels = _currentZoom >= 15 && _currentZoom <= 23;
-    final showNeighborhoodLabels = _currentZoom >= 17 && _currentZoom <= 23;
+    final showContinentLabels = false;
+    final showCountryBorders = false;
+    final showCountryLabels = false;
+    final showStateBorders = false;
+    final showStateLabels = false;
+    final showCityLabels = false;
+    final showMetropolitanRoutes = false;
+    final showStreetLabels = false;
+    final showNeighborhoodLabels = false;
+    final showExtremeDetailLabels = false;
     final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
-    bool shouldDrawPolygons() => true;
+    bool shouldDrawPolygons() => _currentZoom >= 10;
     bool shouldDrawImportedGroups() =>
-      _groupingEnabled && bucketSize > 0 && _currentZoom < 10;
+      _agruparMarcadores && bucketSize > 0;
 
     for (final p in filteredPredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -362,13 +329,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 isPolygon: true,
               );
               if (drawCoords.length < 3) continue;
-              final rawKey = _polygonGeometryKey(coords);
-              if (importedRawPolygonKeys.contains(rawKey)) continue;
-              final drawKey = _polygonGeometryKey(drawCoords);
-              if (!renderedPredioPolygonKeys.add(drawKey)) continue;
               polygons.add(Polygon(
                 points: drawCoords,
-                color: color.withOpacity(uniformFillOpacity),
+                color: color.withOpacity(0.35),
                 borderColor: color.withOpacity(0.95),
                 borderStrokeWidth: 3.6,
               ));
@@ -384,60 +347,48 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
 
       if (markerPoint == null) continue;
-      if (_showPredioLabels) {
-        final label = p.claveCatastral.trim().isNotEmpty
-            ? p.claveCatastral.trim()
-            : p.id.trim();
-        if (label.isNotEmpty) {
-          predioLabels.add(_buildPlainTextLabelMarker(markerPoint, label));
+      if (_mostrarEtiquetas) {
+        final sedatuClave = p.claveCatastral.trim();
+        if (sedatuClave.isNotEmpty) {
+          sedatuLabelMarkers.add(
+            _buildSedatuLabelMarker(markerPoint, sedatuClave),
+          );
         }
       }
-      if (_groupingEnabled && bucketSize > 0) {
+      if (_agruparMarcadores && bucketSize > 0) {
         final bucket = _putInBucket(bucketed, p, markerPoint, bucketSize);
         bucket.sample ??= p;
       }
     }
 
-    if (_groupingEnabled && bucketSize > 0) {
+    if (_agruparMarcadores && bucketSize > 0) {
       final mergedBuckets =
           _mergeOverlappingBuckets(bucketed.values.toList(), bucketSize);
       for (final bucket in mergedBuckets) {
-        markers.add(_buildHeatMarker(bucket));
-      }
-    }
-
-    // Solo pintar icono para el polígono actualmente seleccionado.
-    if (_selectedPredio != null) {
-      final selected = _selectedPredio!;
-      final selectedPos = _markerPointForPredio(selected);
-      if (selectedPos != null) {
-        final selectedColor = _colorMode == _ColorMode.estado
-            ? _colorEstado(selected)
-            : _colorTipo(selected);
-        markers.add(_buildMarker(selected, selectedPos, selectedColor));
+        predioGroupMarkers.add(_buildHeatMarker(bucket));
       }
     }
 
     for (final feature in filteredImportedGeoJson) {
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
+      LatLng? markerPoint = _extractRepresentativePoint(feature.geometry);
+      final sourceAsset =
+          (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+      final isPkAsset = sourceAsset.endsWith('pks.geojson');
       final estatus = feature.estatus?.trim().toLowerCase();
-        final fillColor = feature.esEnvolvente
+      final fillColor = feature.esEnvolvente
           ? const Color(0xFF1976D2)
-          : (estatus == 'negociacion'
-            ? const Color(0xFFFFEB3B) // amarillo para negociacion
-            : (estatus == 'liberado'
+          : (estatus == 'liberado'
               ? const Color(0xFFCDDC39)
-              : const Color(0xFFD32F2F)));
-        final isStation = _isStationFeature(feature);
-        final borderColor = isStation
+              : const Color(0xFFD32F2F));
+      final borderColor = feature.esEstacion
           ? const Color(0xFFFFD54F)
           : fillColor.withOpacity(0.95);
-        final polygonColor = fillColor.withOpacity(uniformFillOpacity);
-        final borderWidth = isStation
+      final polygonOpacity = _currentZoom >= 12 ? 0.35 : 0.18;
+      final borderWidth = feature.esEstacion
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
           : (_currentZoom >= 11 ? 3.0 : 1.6);
-      LatLng? markerPoint;
 
       for (final ring in rings) {
         if (ring.length < 3) continue;
@@ -447,12 +398,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: true,
         );
         if (drawRing.length < 3) continue;
-        final ringKey = _polygonGeometryKey(drawRing);
-        if (!renderedImportedPolygonKeys.add(ringKey)) continue;
-        importedPolygons.add(
+        final targetPolygons = feature.esEnvolvente
+            ? envolventePolygons
+            : importedPolygons;
+        targetPolygons.add(
           Polygon(
             points: drawRing,
-            color: polygonColor,
+            color: fillColor.withOpacity(polygonOpacity),
             borderColor: borderColor,
             borderStrokeWidth: borderWidth,
           ),
@@ -468,7 +420,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: false,
         );
         if (drawLine.length < 2) continue;
-        importedPolylines.add(
+        final targetPolylines = feature.esEnvolvente
+            ? envolventePolylines
+            : importedPolylines;
+        targetPolylines.add(
           Polyline(
             points: drawLine,
             strokeWidth: _currentZoom >= 11 ? 2.4 : 1.4,
@@ -478,14 +433,20 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         markerPoint ??= _centroid(line);
       }
 
-      if (_showPredioLabels && markerPoint != null && !feature.esEnvolvente) {
-        final labelFromProps = _getClaveFromFeature(feature.properties).trim();
-        final label = labelFromProps.isNotEmpty
-            ? labelFromProps
-            : feature.id.trim();
-        if (label.isNotEmpty) {
-          predioLabels.add(_buildPlainTextLabelMarker(markerPoint, label));
+      if (_mostrarEtiquetas && markerPoint != null && !feature.esEnvolvente) {
+        final sedatuClave = _getClaveFromFeature(feature.properties);
+        if (sedatuClave.isNotEmpty) {
+          sedatuLabelMarkers.add(
+            _buildSedatuLabelMarker(markerPoint, sedatuClave),
+          );
         }
+      }
+
+      if (isPkAsset && pkFilterEnabled && _mostrarPks && markerPoint != null) {
+        importedPkMarkers.add(
+          _buildImportedFeatureMarker(feature, markerPoint, borderColor),
+        );
+        continue;
       }
 
       if (shouldDrawImportedGroups() && markerPoint != null && !feature.esEnvolvente) {
@@ -505,15 +466,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             : bucket.noLiberados > 0
                 ? const Color(0xFFD32F2F)
                 : const Color(0xFFF9A825);
-        importedMarkers.add(
+        importedGroupMarkers.add(
           _buildCountMarker(bucket.center, bucket.count, clusterColor),
         );
-      }
-    }
-
-    if (_showPkLabels) {
-      for (final pkPoint in pkGeoPoints) {
-        pkLabels.add(_buildPkLabelMarker(pkPoint));
       }
     }
 
@@ -592,18 +547,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         initialZoom: _defaultZoom,
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          final tappedImported =
-            _findImportedFeatureAtPoint(point, filteredImportedGeoJson);
+          final nonEnvolventes =
+              filteredImportedGeoJson.where((f) => !f.esEnvolvente).toList();
+          final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
           setState(() {
-            // Prioriza feature importado para mostrar la ficha enriquecida.
+            // Muestra solo una ficha: prioriza la última ficha implementada
+            // (GeoJSON importado) cuando ambos elementos se traslapan.
             if (tappedImported != null) {
               _selectedImportedFeature = tappedImported;
               _selectedPredio = null;
-            } else if (tappedPredio != null) {
-              _selectedPredio = tappedPredio;
-              _selectedImportedFeature = null;
             } else {
-              _selectedPredio = null;
+              _selectedPredio = tappedPredio;
               _selectedImportedFeature = null;
             }
           });
@@ -627,6 +581,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ),
         // Nivel 0-3: Vista global, nombres de continentes/planeta (solo base, sin overlays)
         // Nivel 4-9: Países, estados, grandes cadenas montañosas y sus nombres
+        // Envolventes al fondo de todas las capas vectoriales.
+        if (envolventePolygons.isNotEmpty)
+          PolygonLayer(polygons: envolventePolygons),
+        if (envolventePolylines.isNotEmpty)
+          PolylineLayer(polylines: envolventePolylines),
         if (showCountryBorders)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
@@ -651,30 +610,36 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PolygonLayer(polygons: importedPolygons),
         if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
-        if (importedMarkers.isNotEmpty)
-          MarkerLayer(markers: importedMarkers),
-        if (showMunicipalBorders && markers.isNotEmpty)
-          MarkerLayer(markers: markers),
-        if (predioLabels.isNotEmpty)
-          MarkerLayer(markers: predioLabels),
-        if (pkLabels.isNotEmpty)
-          MarkerLayer(markers: pkLabels),
+        if (_agruparMarcadores && importedGroupMarkers.isNotEmpty)
+          MarkerLayer(markers: importedGroupMarkers),
+        if (_agruparMarcadores && predioGroupMarkers.isNotEmpty)
+          MarkerLayer(markers: predioGroupMarkers),
+        if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
+          MarkerLayer(markers: importedPkMarkers),
         // Nivel 15-17: Calles, vecindarios, colonias, parques y nombres
         if (showStreetLabels)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 23,
-            maxNativeZoom: 17,
           ),
         if (showNeighborhoodLabels)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
             userAgentPackageName: 'mx.sao.geoportal_consulta',
             maxZoom: 23,
-            maxNativeZoom: 17,
           ),
-        if (selectedFeaturePin.isNotEmpty) MarkerLayer(markers: selectedFeaturePin),
+        // Nivel 18-23: Detalle extremo, edificios, manzanas, entradas y nombres
+        if (showExtremeDetailLabels)
+          TileLayer(
+            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'mx.sao.geoportal_consulta',
+            maxZoom: 23,
+          ),
+        if (_mostrarEtiquetas && sedatuLabelMarkers.isNotEmpty)
+          MarkerLayer(markers: sedatuLabelMarkers),
+        if (pkFilterEnabled && _mostrarPks && selectedFeaturePin.isNotEmpty)
+          MarkerLayer(markers: selectedFeaturePin),
       ],
     );
   }
@@ -693,8 +658,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Predio? _findPredioAtPoint(LatLng point, List<Predio> predios) {
-    Predio? fallback;
-    double? bestDistance;
     for (final p in predios.reversed) {
       final geo = p.geometry;
       if (geo == null) continue;
@@ -704,23 +667,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (_isPointInPolygon(point, ring)) {
           return p;
         }
-        final distance = _distanceBetweenPoints(point, _centroid(ring));
-        if (distance <= _tapSelectionTolerance() &&
-            (bestDistance == null || distance < bestDistance)) {
-          bestDistance = distance;
-          fallback = p;
-        }
       }
     }
-    return fallback;
+    return null;
   }
 
   GeoJsonPredioFeature? _findImportedFeatureAtPoint(
     LatLng point,
     List<GeoJsonPredioFeature> features,
   ) {
-    GeoJsonPredioFeature? fallback;
-    double? bestDistance;
     for (final feature in features.reversed) {
       final polys = _extractPolygons(feature.geometry);
       for (final ring in polys) {
@@ -728,22 +683,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         if (_isPointInPolygon(point, ring)) {
           return feature;
         }
-        final distance = _distanceBetweenPoints(point, _centroid(ring));
-        if (distance <= _tapSelectionTolerance() &&
-            (bestDistance == null || distance < bestDistance)) {
-          bestDistance = distance;
-          fallback = feature;
-        }
       }
     }
-    return fallback;
-  }
-
-  double _tapSelectionTolerance() {
-    if (_currentZoom >= 16) return 0.004;
-    if (_currentZoom >= 14) return 0.006;
-    if (_currentZoom >= 12) return 0.01;
-    return 0.016;
+    return null;
   }
 
   bool _isPointInPolygon(LatLng point, List<LatLng> ring) {
@@ -823,124 +765,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ),
       ),
     );
-  }
-
-  Marker _buildPlainTextLabelMarker(LatLng point, String text) {
-    return Marker(
-      point: point,
-      width: 180,
-      height: 20,
-      child: IgnorePointer(
-        child: Center(
-          child: Opacity(
-            opacity: 0.6,
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Marker _buildPkLabelMarker(PkGeoPoint pkPoint) {
-    return Marker(
-      point: pkPoint.point,
-      width: 96,
-      height: 20,
-      child: IgnorePointer(
-        child: Center(
-          child: Opacity(
-            opacity: 0.6,
-            child: Text(
-              pkPoint.pk,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                color: const Color(0xFFFFF59D),
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCompassRose() {
-    Widget cardinal(String label) {
-      return Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFF1B4332),
-        ),
-      );
-    }
-
-    Widget spike(double angle, double size, Color color) {
-      return Transform.rotate(
-        angle: angle,
-        child: Icon(
-          Icons.navigation,
-          size: size,
-          color: color,
-        ),
-      );
-    }
-
-    return SizedBox(
-      width: 86,
-      height: 86,
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned(top: 0, child: cardinal('N')),
-            Positioned(bottom: 0, child: cardinal('S')),
-            Positioned(left: 0, child: cardinal('O')),
-            Positioned(right: 0, child: cardinal('E')),
-            spike(0, 24, const Color(0xFFD32F2F)),
-            spike(math.pi, 24, const Color(0xFF78909C)),
-            spike(math.pi / 2, 20, const Color(0xFF90A4AE)),
-            spike(-math.pi / 2, 20, const Color(0xFF90A4AE)),
-            spike(math.pi / 4, 14, const Color(0xFFB0BEC5)),
-            spike(-math.pi / 4, 14, const Color(0xFFB0BEC5)),
-            spike(3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
-            spike(-3 * math.pi / 4, 14, const Color(0xFFB0BEC5)),
-            Container(
-              width: 6,
-              height: 6,
-              decoration: const BoxDecoration(
-                color: Color(0xFF455A64),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _polygonGeometryKey(List<LatLng> points) {
-    return points
-        .map(
-          (p) =>
-              '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}',
-        )
-        .join('|');
   }
 
   _HeatBucket _putInBucket(
@@ -1051,110 +875,185 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return math.sqrt((latDelta * latDelta) + (lngDelta * lngDelta));
   }
 
-  String _compactMatch(String input) {
-    return _normalizeForMatch(input).replaceAll(RegExp(r'[^a-z0-9]+'), '');
-  }
-
-  String _readFeatureProperty(
-    Map<String, dynamic> properties,
-    List<String> exactKeys, {
-    List<List<String>> fragmentGroups = const [],
-  }) {
-    final entries = properties.entries.toList();
-
-    String? readExact(String candidate) {
-      final compactCandidate = _compactMatch(candidate);
-      for (final entry in entries) {
-        if (_compactMatch(entry.key) != compactCandidate) continue;
-        final value = entry.value?.toString().trim() ?? '';
-        if (value.isNotEmpty && value.toUpperCase() != 'NONE') {
-          return value;
-        }
-      }
-      return null;
-    }
-
-    String? readFragments(List<String> fragments) {
-      final compactFragments = fragments.map(_compactMatch).toList();
-      for (final entry in entries) {
-        final key = _compactMatch(entry.key);
-        if (!compactFragments.every((fragment) => key.contains(fragment))) {
-          continue;
-        }
-        final value = entry.value?.toString().trim() ?? '';
-        if (value.isNotEmpty && value.toUpperCase() != 'NONE') {
-          return value;
-        }
-      }
-      return null;
-    }
-
-    for (final key in exactKeys) {
-      final value = readExact(key);
-      if (value != null) return value;
-    }
-
-    for (final fragments in fragmentGroups) {
-      final value = readFragments(fragments);
-      if (value != null) return value;
-    }
-
-    return '';
-  }
-
-  String _readFeatureFlagValue(
-    Map<String, dynamic> properties,
-    bool computed,
-    List<String> exactKeys, {
-    List<List<String>> fragmentGroups = const [],
-  }) {
-    final raw = _readFeatureProperty(
-      properties,
-      exactKeys,
-      fragmentGroups: fragmentGroups,
-    );
-    final normalized = _normalizeYesNoValue(raw);
-    if (normalized.isNotEmpty) return normalized;
-    return computed ? 'Sí' : 'No';
-  }
-
-  String _normalizeYesNoValue(dynamic value) {
-    if (value == null) return '';
-    final raw = value.toString().trim().toLowerCase();
-    if (raw.isEmpty || raw == 'none' || raw == 'null') return '';
-    if (raw == 'true' || raw == '1' || raw == 'si' || raw == 'sí' || raw == 'yes') {
-      return 'Sí';
-    }
-    if (raw == 'false' || raw == '0' || raw == 'no') {
-      return 'No';
-    }
-    return value.toString().trim();
-  }
-
   Marker _buildMarker(Predio p, LatLng pos, Color color) {
+    final pkLabel = _pkLabelFromPredio(p);
     return Marker(
       point: pos,
-      width: 32,
-      height: 32,
+      width: 112,
+      height: 44,
       child: GestureDetector(
         onTap: () => setState(() => _selectedPredio = p),
-        child: Container(
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: const Icon(Icons.location_on, color: Colors.white, size: 16),
+              child: const Icon(Icons.location_on, color: Colors.white, size: 15),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: color.withOpacity(0.75), width: 1.2),
+                ),
+                child: Text(
+                  pkLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: const Color(0xFF17332A),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  Marker _buildImportedFeatureMarker(
+    GeoJsonPredioFeature feature,
+    LatLng pos,
+    Color color,
+  ) {
+    final pkLabel = _pkLabelFromImportedFeature(feature.properties);
+    return Marker(
+      point: pos,
+      width: 128,
+      height: 40,
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _selectedImportedFeature = feature;
+          _selectedPredio = null;
+        }),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.92),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.22),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.place, color: Colors.white, size: 14),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: color.withOpacity(0.75), width: 1.1),
+                ),
+                child: Text(
+                  pkLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: const Color(0xFF17332A),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Marker _buildSedatuLabelMarker(LatLng pos, String claveSedatu) {
+    return Marker(
+      point: pos,
+      width: 120,
+      height: 24,
+      alignment: Alignment.topCenter,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xE6FFFDE7),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF6D4C41), width: 1),
+          ),
+          child: Text(
+            claveSedatu,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF3E2723),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _pkLabelFromPredio(Predio p) {
+    final start = p.kmInicio;
+    final end = p.kmFin;
+    if (start != null && end != null) {
+      return 'PK ${_kmFmt(start)}-${_kmFmt(end)}';
+    }
+    if (start != null) return 'PK ${_kmFmt(start)}';
+    if (end != null) return 'PK ${_kmFmt(end)}';
+    return 'PK s/d';
+  }
+
+  String _pkLabelFromImportedFeature(Map<String, dynamic> properties) {
+    final cadenamiento = _extractPropertyByKeyFragments(
+      properties,
+      ['CADEN'],
+      fallbackFragments: ['PK'],
+    );
+    final cleanCadenamiento = cadenamiento.trim();
+    if (cleanCadenamiento.isNotEmpty) {
+      return cleanCadenamiento.toUpperCase().startsWith('PK')
+          ? cleanCadenamiento
+          : 'PK $cleanCadenamiento';
+    }
+
+    final kmInicio = _getKmInicioFromFeature(properties).trim();
+    final kmFin = _getKmFinFromFeature(properties).trim();
+    if (kmInicio.isNotEmpty && kmFin.isNotEmpty) {
+      return 'PK $kmInicio-$kmFin';
+    }
+    if (kmInicio.isNotEmpty) return 'PK $kmInicio';
+    if (kmFin.isNotEmpty) return 'PK $kmFin';
+    return 'PK s/d';
   }
 
   Widget _buildTopBar(
@@ -1162,27 +1061,28 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<MunicipioLimite> municipios,
     [List<GeoJsonPredioFeature> importedFeatures = const []]
   ) {
+    final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !_isStationFeature(f))
+      .where((f) => !f.esEnvolvente && !f.esEstacion)
       .toList();
-    final liberacionFiltered = _applyLiberacionFilter(predios);
-    final filteredPredios = _applyAllFilters(predios);
+    final liberacionFiltered = _applyLiberacionFilter(prediosOperative);
+    final filteredPredios = _applyAllFilters(prediosOperative);
     final tipoProyectoCounts = countByFieldUnified(
-      predios: predios,
+      predios: prediosOperative,
       imported: importedOperative,
       predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
       importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
       emptyLabel: 'Sin proyecto',
     );
     final allMunicipioCounts = countByFieldUnified(
-      predios: predios,
+      predios: prediosOperative,
       imported: importedOperative,
       predioSelector: (p) => (p.municipio ?? p.ejido ?? ''),
       importedSelector: (props) => _getMunicipioFromFeature(props),
       emptyLabel: 'Sin municipio',
     );
     final clasificaCounts = countByFieldUnified(
-      predios: predios,
+      predios: prediosOperative,
       imported: importedOperative,
       predioSelector: (p) {
         final tipo = p.tipoPropiedad.toUpperCase().trim();
@@ -1194,16 +1094,16 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       emptyLabel: 'Sin clasificación',
     );
     final segmentoCounts = countByFieldUnified(
-      predios: predios,
+      predios: prediosOperative,
       imported: importedOperative,
       predioSelector: (p) => _extractSegmentNumber(p.tramo),
       importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
       emptyLabel: 'Sin segmento',
     );
     final estatusCounts = <String, int>{
-      'Todos': predios.length + importedOperative.length,
-      'Liberados': predios.where(_isLiberado).length + importedOperative.where(_isImportedLiberado).length,
-      'No liberados': predios.where(_isNoLiberado).length + importedOperative.where(_isImportedNoLiberado).length,
+      'Todos': prediosOperative.length + importedOperative.length,
+      'Liberados': prediosOperative.where(_isLiberado).length + importedOperative.where(_isImportedLiberado).length,
+      'No liberados': prediosOperative.where(_isNoLiberado).length + importedOperative.where(_isImportedNoLiberado).length,
     };
     return Container(
       height: 112,
@@ -1223,14 +1123,31 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           children: [
             Row(
               children: [
-                const Icon(Icons.map_rounded, color: Colors.white, size: 28),
+                const Icon(Icons.map_rounded, color: Colors.white, size: 24),
                 const SizedBox(width: 10),
                 Text(
                   'Geoportal de Consulta',
                   style: GoogleFonts.inter(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Vista única: todos los proyectos',
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
                 const Spacer(),
@@ -1303,139 +1220,62 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             const SizedBox(height: 4),
             Row(
               children: [
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await _setGroupingEnabled(!_groupingEnabled);
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(
-                      color: _groupingEnabled
-                          ? const Color(0xFFFFD54F)
-                          : Colors.white.withOpacity(0.45),
-                    ),
-                    backgroundColor: _groupingEnabled
-                        ? const Color(0x26FFD54F)
-                        : Colors.transparent,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: Icon(
-                    _groupingEnabled
-                        ? Icons.bubble_chart_rounded
-                        : Icons.scatter_plot_outlined,
-                    size: 14,
-                  ),
-                  label: Text(
-                    _groupingEnabled ? 'Agrupación ON' : 'Agrupación OFF',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() => _showPredioLabels = !_showPredioLabels);
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(
-                      color: _showPredioLabels
-                          ? const Color(0xFF80CBC4)
-                          : Colors.white.withOpacity(0.45),
-                    ),
-                    backgroundColor: _showPredioLabels
-                        ? const Color(0x2680CBC4)
-                        : Colors.transparent,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: Icon(
-                    _showPredioLabels
-                        ? Icons.label_important_rounded
-                        : Icons.label_outline_rounded,
-                    size: 14,
-                  ),
-                  label: Text(
-                    _showPredioLabels ? 'Etiquetas ON' : 'Etiquetas OFF',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() => _showPkLabels = !_showPkLabels);
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(
-                      color: _showPkLabels
-                          ? const Color(0xFFFFF59D)
-                          : Colors.white.withOpacity(0.45),
-                    ),
-                    backgroundColor: _showPkLabels
-                        ? const Color(0x26FFF59D)
-                        : Colors.transparent,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: Icon(
-                    _showPkLabels
-                        ? Icons.place_rounded
-                        : Icons.place_outlined,
-                    size: 14,
-                  ),
-                  label: Text(
-                    _showPkLabels ? 'PKs ON' : 'PKs OFF',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () => _openAdvancedFiltersPanel(
-                    predios,
-                    importedFeatures,
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withOpacity(0.45)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: const Icon(Icons.tune_rounded, size: 14),
-                  label: Text(
-                    _segmentoQueries.isEmpty &&
-                      _selectedEstatus.isEmpty &&
-                      _selectedEjidos.isEmpty &&
-                      _selectedClasificaciones.isEmpty &&
-                        _selectedMunicipios.isEmpty &&
-                        _liberacionFilter == _LiberacionFilter.todos &&
-                        !_filterSoloEstaciones
-                      ? 'Filtros avanzados'
-                      : 'Filtros avanzados *',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _quickToggleChip(
+                            label: 'Agrupación',
+                            isOn: _agruparMarcadores,
+                            icon: Icons.bubble_chart_rounded,
+                            onTap: () => setState(() {
+                              _agruparMarcadores = !_agruparMarcadores;
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          _quickToggleChip(
+                            label: 'Etiquetas',
+                            isOn: _mostrarEtiquetas,
+                            icon: Icons.sell_outlined,
+                            onTap: () => setState(() => _mostrarEtiquetas = !_mostrarEtiquetas),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: () => _openAdvancedFiltersPanel(
+                              predios,
+                              importedFeatures,
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(color: Colors.white.withOpacity(0.45)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.tune_rounded, size: 14),
+                            label: Text(
+                              _segmentoQueries.isEmpty &&
+                                      _selectedEstatus.isEmpty &&
+                                      _selectedEjidos.isEmpty &&
+                                      _selectedClasificaciones.isEmpty &&
+                                      _selectedMunicipios.isEmpty &&
+                                      _liberacionFilter == _LiberacionFilter.todos &&
+                                      !_filterSoloEstaciones
+                                  ? 'Filtros avanzados'
+                                  : 'Filtros avanzados *',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1447,68 +1287,47 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
 
+  Widget _quickToggleChip({
+    required String label,
+    required bool isOn,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    final onColor = const Color(0xFFD4AF37);
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: BorderSide(
+          color: isOn ? onColor : Colors.white.withOpacity(0.35),
+          width: isOn ? 1.6 : 1,
+        ),
+        backgroundColor: isOn ? onColor.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+      icon: Icon(icon, size: 16),
+      label: Text(
+        '$label ${isOn ? 'ON' : 'OFF'}',
+        style: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openAdvancedFiltersPanel(
     List<Predio> predios,
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
+    final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !_isStationFeature(f))
+      .where((f) => !f.esEnvolvente && !f.esEstacion)
       .toList();
-    final importedWithEnvolventes = importedFeatures
-      .where((f) => !_isStationFeature(f))
-      .toList();
-    // Unificar conteos para filtros avanzados de todos los campos relevantes
-    final segmentoCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedOperative,
-      predioSelector: (p) => _extractSegmentNumber(p.tramo),
-      importedSelector: (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
-      emptyLabel: 'Sin segmento',
-    );
-    final ejidoCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedOperative,
-      predioSelector: (p) => p.ejido ?? '',
-      importedSelector: (props) => (props['EJIDO'] ?? props['ejido'] ?? '').toString(),
-      emptyLabel: 'Sin ejido',
-    );
-    final municipioCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedOperative,
-      predioSelector: (p) => (p.municipio ?? ''),
-      importedSelector: (props) => _getMunicipioFromFeature(props),
-      emptyLabel: 'Sin municipio',
-    );
-    final estatusCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedOperative,
-      predioSelector: (p) => _estatusFilterLabelFromPredio(p),
-      importedSelector: (props) => _estatusFilterLabelFromProperties(props),
-      emptyLabel: 'Sin estatus',
-    );
-    final tipoProyectoCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedWithEnvolventes,
-      predioSelector: (p) => _tipoProyectoLabel(p.proyecto),
-      importedSelector: (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
-      emptyLabel: 'Sin proyecto',
-    );
-    final clasificaCounts = countByFieldUnified(
-      predios: predios,
-      imported: importedOperative,
-      predioSelector: (p) {
-        final tipo = p.tipoPropiedad.toUpperCase().trim();
-        if (tipo == 'SOCIAL') return 'Pública';
-        if (tipo == 'PRIVADA') return 'Privada';
-        return 'Sin clasificación';
-      },
-      importedSelector: (props) => _getTipoPropiedadFromFeature(props),
-      emptyLabel: 'Sin clasificación',
-    );
-    final estacionesCount = predios.where(_isPredioStation).length +
-      importedFeatures
-        .where((f) => !f.esEnvolvente && _isStationFeature(f))
-        .length;
+    final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -1517,6 +1336,279 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       pageBuilder: (dialogContext, __, ___) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            Map<String, int> sanitizeCounts(Map<String, int> source) {
+              final cleaned = <String, int>{};
+              source.forEach((k, v) {
+                if (k.trim().isEmpty || v <= 0) return;
+                cleaned[k] = v;
+              });
+              return cleaned;
+            }
+
+            String clasificacionPredio(Predio p) {
+              final tipo = p.tipoPropiedad.toUpperCase().trim();
+              if (tipo == 'SOCIAL') return 'Pública';
+              if (tipo == 'PRIVADA') return 'Privada';
+              return 'Sin clasificación';
+            }
+
+            String ejidoImported(Map<String, dynamic> props) {
+              return _getEjidoFromFeature(props);
+            }
+
+            Map<String, int> buildDynamicCounts(
+              List<Predio> prediosBase,
+              List<GeoJsonPredioFeature> importedBase,
+              String Function(Predio) predioSelector,
+              String Function(Map<String, dynamic>) importedSelector, {
+              required String emptyLabel,
+            }) {
+              final counts = countByFieldUnified(
+                predios: prediosBase,
+                imported: importedBase,
+                predioSelector: predioSelector,
+                importedSelector: importedSelector,
+                emptyLabel: emptyLabel,
+              );
+              return sanitizeCounts(counts);
+            }
+
+            void sanitizeSelections({
+              required Map<String, int> tipoProyectoCounts,
+              required Map<String, int> estatusCounts,
+              required Map<String, int> segmentoCounts,
+              required Map<String, int> ejidoCounts,
+              required Map<String, int> municipioCounts,
+              required Map<String, int> clasificaCounts,
+            }) {
+              _selectedTipoProyectos.removeWhere((v) => !tipoProyectoCounts.containsKey(v));
+              _selectedEstatus.removeWhere((v) => !estatusCounts.containsKey(v));
+              _segmentoQueries.removeWhere((v) => !segmentoCounts.containsKey(v));
+              _selectedEjidos.removeWhere((v) => !ejidoCounts.containsKey(v));
+              _selectedMunicipios.removeWhere((v) => !municipioCounts.containsKey(v));
+              _selectedClasificaciones.removeWhere((v) => !clasificaCounts.containsKey(v));
+            }
+
+            List<Predio> prediosForCascade({
+              bool applyTipoProyecto = false,
+              bool applyEstatus = false,
+              bool applySegmento = false,
+              bool applyEjido = false,
+              bool applyMunicipio = false,
+              bool applyClasificacion = false,
+            }) {
+              if (_filterSoloEstaciones) return const [];
+              var filtered = _applyLiberacionFilter(prediosOperative);
+
+              if (applyTipoProyecto && _selectedTipoProyectos.isNotEmpty) {
+                filtered = filtered.where((p) {
+                  final label = _tipoProyectoLabel(p.proyecto);
+                  return _selectedTipoProyectos.contains(label);
+                }).toList();
+              }
+              if (applyEstatus && _selectedEstatus.isNotEmpty) {
+                final selectedEstatusKeys =
+                    _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
+                filtered = filtered.where((p) {
+                  final estatusKey =
+                      _normalizeEstatusFilterLabel(_estatusFilterLabelFromPredio(p));
+                  return selectedEstatusKeys.contains(estatusKey);
+                }).toList();
+              }
+              if (applySegmento && _segmentoQueries.isNotEmpty) {
+                filtered = filtered.where((p) => _matchesSegmentQuery(p.tramo)).toList();
+              }
+              if (applyEjido && _selectedEjidos.isNotEmpty) {
+                filtered = filtered.where((p) {
+                  final key = _normalizeFilterDimensionValue(
+                    p.ejido ?? '',
+                    emptyLabel: 'Sin ejido',
+                  );
+                  return _selectedEjidos.contains(key);
+                }).toList();
+              }
+              if (applyMunicipio && _selectedMunicipios.isNotEmpty) {
+                filtered = filtered.where((p) {
+                  final value = (p.municipio ?? p.ejido ?? '').trim();
+                  if (_selectedMunicipios.contains('Sin municipio') && value.isEmpty) {
+                    return true;
+                  }
+                  if (value.isEmpty) return false;
+                  final normalized = _normalizeMunicipioName(value);
+                  return _selectedMunicipios
+                      .any((m) => _normalizeMunicipioName(m) == normalized);
+                }).toList();
+              }
+              if (applyClasificacion && _selectedClasificaciones.isNotEmpty) {
+                filtered = filtered.where((p) {
+                  final tipo = p.tipoPropiedad.toUpperCase().trim();
+                  final clasificacion = tipo == 'SOCIAL'
+                      ? 'Pública'
+                      : (tipo == 'PRIVADA' ? 'Privada' : 'Sin clasificación');
+                  return _selectedClasificaciones.contains(clasificacion);
+                }).toList();
+              }
+              return filtered;
+            }
+
+            List<GeoJsonPredioFeature> importedForCascade({
+              bool applyTipoProyecto = false,
+              bool applyEstatus = false,
+              bool applySegmento = false,
+              bool applyEjido = false,
+              bool applyMunicipio = false,
+              bool applyClasificacion = false,
+            }) {
+              var filtered = importedOperative;
+
+              if (_liberacionFilter != _LiberacionFilter.todos) {
+                filtered = filtered.where((feature) {
+                  if (_liberacionFilter == _LiberacionFilter.liberados) {
+                    return _isImportedLiberado(feature);
+                  }
+                  return _isImportedNoLiberado(feature);
+                }).toList();
+              }
+
+              if (applyTipoProyecto && _selectedTipoProyectos.isNotEmpty) {
+                filtered = filtered.where((feature) {
+                  final label =
+                      _tipoProyectoLabel(feature.properties['PROYECTO']?.toString());
+                  return _selectedTipoProyectos.contains(label);
+                }).toList();
+              }
+              if (applyEstatus && _selectedEstatus.isNotEmpty) {
+                final selectedEstatusKeys =
+                    _selectedEstatus.map(_normalizeEstatusFilterLabel).toSet();
+                filtered = filtered.where((feature) {
+                  final estatusKey = _normalizeEstatusFilterLabel(
+                    _estatusFilterLabelFromProperties(feature.properties),
+                  );
+                  return selectedEstatusKeys.contains(estatusKey);
+                }).toList();
+              }
+              if (applySegmento && _segmentoQueries.isNotEmpty) {
+                filtered = filtered.where((feature) {
+                  return _matchesSegmentQuery(
+                    _getSegmentoFromFeature(feature.properties),
+                  );
+                }).toList();
+              }
+              if (applyEjido && _selectedEjidos.isNotEmpty) {
+                filtered = filtered.where((feature) {
+                  final key = _getEjidoFromFeature(feature.properties).trim();
+                  return _selectedEjidos.contains(key);
+                }).toList();
+              }
+              if (applyMunicipio && _selectedMunicipios.isNotEmpty) {
+                filtered = filtered.where((feature) {
+                  final value = _getMunicipioFromFeature(feature.properties).trim();
+                  if (_selectedMunicipios.contains('Sin municipio') && value.isEmpty) {
+                    return true;
+                  }
+                  if (value.isEmpty) return false;
+                  final normalized = _normalizeMunicipioName(value);
+                  return _selectedMunicipios
+                      .any((m) => _normalizeMunicipioName(m) == normalized);
+                }).toList();
+              }
+              if (applyClasificacion && _selectedClasificaciones.isNotEmpty) {
+                filtered = filtered.where((feature) {
+                  final clasificacion = _getTipoPropiedadFromFeature(feature.properties);
+                  final label =
+                      clasificacion.isEmpty ? 'Sin clasificación' : clasificacion;
+                  return _selectedClasificaciones.contains(label);
+                }).toList();
+              }
+
+              return filtered;
+            }
+
+            final tipoProyectoCounts = buildDynamicCounts(
+              prediosForCascade(),
+              importedForCascade(),
+              (p) => _tipoProyectoLabel(p.proyecto),
+              (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
+              emptyLabel: 'Sin proyecto',
+            );
+            final estatusCounts = buildDynamicCounts(
+              prediosForCascade(applyTipoProyecto: true),
+              importedForCascade(applyTipoProyecto: true),
+              (p) => _estatusFilterLabelFromPredio(p),
+              (props) => _estatusFilterLabelFromProperties(props),
+              emptyLabel: 'Sin estatus',
+            );
+            final segmentoCounts = buildDynamicCounts(
+              prediosForCascade(applyTipoProyecto: true, applyEstatus: true),
+              importedForCascade(applyTipoProyecto: true, applyEstatus: true),
+              (p) => _extractSegmentNumber(p.tramo),
+              (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
+              emptyLabel: 'Sin segmento',
+            );
+            final ejidoCounts = buildDynamicCounts(
+              prediosForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+              ),
+              importedForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+              ),
+              (p) => _normalizeFilterDimensionValue(
+                p.ejido ?? '',
+                emptyLabel: 'Sin ejido',
+              ),
+              ejidoImported,
+              emptyLabel: 'Sin ejido',
+            );
+            final municipioCounts = buildDynamicCounts(
+              prediosForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+                applyEjido: true,
+              ),
+              importedForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+                applyEjido: true,
+              ),
+              (p) => (p.municipio ?? ''),
+              (props) => _getMunicipioFromFeature(props),
+              emptyLabel: 'Sin municipio',
+            );
+            final clasificaCounts = buildDynamicCounts(
+              prediosForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+                applyEjido: true,
+                applyMunicipio: true,
+              ),
+              importedForCascade(
+                applyTipoProyecto: true,
+                applyEstatus: true,
+                applySegmento: true,
+                applyEjido: true,
+                applyMunicipio: true,
+              ),
+              clasificacionPredio,
+              (props) => _getTipoPropiedadFromFeature(props),
+              emptyLabel: 'Sin clasificación',
+            );
+
+            sanitizeSelections(
+              tipoProyectoCounts: tipoProyectoCounts,
+              estatusCounts: estatusCounts,
+              segmentoCounts: segmentoCounts,
+              ejidoCounts: ejidoCounts,
+              municipioCounts: municipioCounts,
+              clasificaCounts: clasificaCounts,
+            );
+
             void updateFilters(VoidCallback changes) {
               if (!mounted) return;
               setState(changes);
@@ -1558,144 +1650,153 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                             ],
                           ),
                           const SizedBox(height: 8),
-                          _countSectionMulti(
-                            title: 'Tipo de proyecto',
-                            counts: tipoProyectoCounts,
-                            selectedLabels: _selectedTipoProyectos,
-                            onChipTap: (tipo) {
-                              updateFilters(() {
-                                if (_selectedTipoProyectos.contains(tipo)) {
-                                  _selectedTipoProyectos.remove(tipo);
-                                } else {
-                                  _selectedTipoProyectos.add(tipo);
-                                }
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Estatus',
-                            counts: estatusCounts,
-                            selectedLabels: _selectedEstatus,
-                            onChipTap: (estatus) {
-                              updateFilters(() {
-                                if (_selectedEstatus.contains(estatus)) {
-                                  _selectedEstatus.remove(estatus);
-                                } else {
-                                  _selectedEstatus.add(estatus);
-                                }
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Segmentos',
-                            counts: segmentoCounts,
-                            selectedLabels: _segmentoQueries,
-                            onChipTap: (segmento) {
-                              updateFilters(() {
-                                if (_segmentoQueries.contains(segmento)) {
-                                  _segmentoQueries.remove(segmento);
-                                } else {
-                                  _segmentoQueries.add(segmento);
-                                }
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Ejidos',
-                            counts: ejidoCounts,
-                            selectedLabels: _selectedEjidos,
-                            onChipTap: (ejido) {
-                              updateFilters(() {
-                                if (_selectedEjidos.contains(ejido)) {
-                                  _selectedEjidos.remove(ejido);
-                                } else {
-                                  _selectedEjidos.add(ejido);
-                                }
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Municipios',
-                            counts: municipioCounts,
-                            selectedLabels: _selectedMunicipios,
-                            onChipTap: (municipio) {
-                              updateFilters(() {
-                                if (_selectedMunicipios.contains(municipio)) {
-                                  _selectedMunicipios.remove(municipio);
-                                } else {
-                                  _selectedMunicipios.add(municipio);
-                                }
-                                _lastFocusedMunicipioKey = null;
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _countSectionMulti(
-                            title: 'Clasificación',
-                            counts: clasificaCounts,
-                            selectedLabels: _selectedClasificaciones,
-                            onChipTap: (clasificacion) {
-                              updateFilters(() {
-                                if (_selectedClasificaciones.contains(clasificacion)) {
-                                  _selectedClasificaciones.remove(clasificacion);
-                                } else {
-                                  _selectedClasificaciones.add(clasificacion);
-                                }
-                                _selectedPredio = null;
-                                _selectedImportedFeature = null;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Column(
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Solo Estaciones',
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                  _countSectionMulti(
+                                    title: 'Tipo de proyecto',
+                                    counts: tipoProyectoCounts,
+                                    selectedLabels: _selectedTipoProyectos,
+                                    onChipTap: (tipo) {
+                                      updateFilters(() {
+                                        if (_selectedTipoProyectos.contains(tipo)) {
+                                          _selectedTipoProyectos.remove(tipo);
+                                        } else {
+                                          _selectedTipoProyectos.add(tipo);
+                                        }
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
                                   ),
-                                  Text(
-                                    '$estacionesCount estaciones disponibles',
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white54,
-                                      fontSize: 11,
-                                    ),
+                                  const SizedBox(height: 12),
+                                  _countSectionMulti(
+                                    title: 'Estatus',
+                                    counts: estatusCounts,
+                                    selectedLabels: _selectedEstatus,
+                                    onChipTap: (estatus) {
+                                      updateFilters(() {
+                                        if (_selectedEstatus.contains(estatus)) {
+                                          _selectedEstatus.remove(estatus);
+                                        } else {
+                                          _selectedEstatus.add(estatus);
+                                        }
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _countSectionMulti(
+                                    title: 'Segmentos',
+                                    counts: segmentoCounts,
+                                    selectedLabels: _segmentoQueries,
+                                    onChipTap: (segmento) {
+                                      updateFilters(() {
+                                        if (_segmentoQueries.contains(segmento)) {
+                                          _segmentoQueries.remove(segmento);
+                                        } else {
+                                          _segmentoQueries.add(segmento);
+                                        }
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _countSectionMulti(
+                                    title: 'Ejidos',
+                                    counts: ejidoCounts,
+                                    selectedLabels: _selectedEjidos,
+                                    onChipTap: (ejido) {
+                                      updateFilters(() {
+                                        if (_selectedEjidos.contains(ejido)) {
+                                          _selectedEjidos.remove(ejido);
+                                        } else {
+                                          _selectedEjidos.add(ejido);
+                                        }
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _countSectionMulti(
+                                    title: 'Municipios',
+                                    counts: municipioCounts,
+                                    selectedLabels: _selectedMunicipios,
+                                    onChipTap: (municipio) {
+                                      updateFilters(() {
+                                        if (_selectedMunicipios.contains(municipio)) {
+                                          _selectedMunicipios.remove(municipio);
+                                        } else {
+                                          _selectedMunicipios.add(municipio);
+                                        }
+                                        _lastFocusedMunicipioKey = null;
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _countSectionMulti(
+                                    title: 'Clasificación',
+                                    counts: clasificaCounts,
+                                    selectedLabels: _selectedClasificaciones,
+                                    onChipTap: (clasificacion) {
+                                      updateFilters(() {
+                                        if (_selectedClasificaciones.contains(clasificacion)) {
+                                          _selectedClasificaciones.remove(clasificacion);
+                                        } else {
+                                          _selectedClasificaciones.add(clasificacion);
+                                        }
+                                        _selectedPredio = null;
+                                        _selectedImportedFeature = null;
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Solo Estaciones',
+                                            style: GoogleFonts.inter(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          Text(
+                                            '$estacionesCount estaciones disponibles',
+                                            style: GoogleFonts.inter(
+                                              color: Colors.white54,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const Spacer(),
+                                      Switch.adaptive(
+                                        value: _filterSoloEstaciones,
+                                        onChanged: (v) => updateFilters(() {
+                                          _filterSoloEstaciones = v;
+                                          _selectedPredio = null;
+                                          _selectedImportedFeature = null;
+                                        }),
+                                        activeColor: const Color(0xFFFFD54F),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                              const Spacer(),
-                              Switch.adaptive(
-                                value: _filterSoloEstaciones,
-                                onChanged: (v) => updateFilters(() {
-                                  _filterSoloEstaciones = v;
-                                  _selectedPredio = null;
-                                  _selectedImportedFeature = null;
-                                }),
-                                activeColor: const Color(0xFFFFD54F),
-                              ),
-                            ],
+                            ),
                           ),
-                          const Spacer(),
+                          const SizedBox(height: 12),
                           Row(
                             children: [
                               Expanded(
@@ -1735,25 +1836,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                             ],
                           ),
                           const SizedBox(height: 8),
-                          Builder(
-                            builder: (_) {
-                              final visiblePrediosCount =
-                                  _applyAllFilters(predios).length;
-                              final visibleImportedCount = _applyAllImportedFilters(
-                                importedFeatures,
-                              ).where((f) => !f.esEnvolvente).length;
-                              final visibleTotalCount =
-                                  visiblePrediosCount + visibleImportedCount;
-
-                              return Text(
-                                '$visibleTotalCount elementos visibles',
-                                style: GoogleFonts.inter(
-                                  color: Colors.white70,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              );
-                            },
+                          Text(
+                            '${_applyAllFilters(prediosOperative).length} predios visibles',
+                            style: GoogleFonts.inter(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
@@ -1910,6 +1999,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
   Widget _buildDetailPanel(Predio predio) {
+    final isTapPredio = _tipoProyectoLabel(predio.proyecto) == 'TAP';
+    final forceGreenGestion = isTapPredio && _isLiberado(predio);
+    final gestionIdentificacion = forceGreenGestion || predio.identificacion;
+    final gestionLevantamiento = forceGreenGestion || predio.levantamiento;
+    final gestionCop = forceGreenGestion || predio.cop;
+    final gestionNegociacion = forceGreenGestion || predio.negociacion;
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -1976,10 +2071,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   const Divider(height: 24),
                   _sectionTitle('Estado de gestión'),
                   const SizedBox(height: 8),
-                  _estadoChip('Identificación', predio.identificacion),
-                  _estadoChip('Levantamiento', predio.levantamiento),
-                  _estadoChip('COP firmado', predio.cop),
-                  _estadoChip('Negociación', predio.negociacion),
+                  _estadoChip('Identificación', gestionIdentificacion),
+                  _estadoChip('Levantamiento', gestionLevantamiento),
+                  _estadoChip('COP firmado', gestionCop),
+                  _estadoChip('Negociación', gestionNegociacion),
                   const SizedBox(height: 12),
                   // Barra de progreso
                   ClipRRect(
@@ -2012,7 +2107,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final items = _colorMode == _ColorMode.estado
         ? [
             ('Liberado', const Color(0xFF2E7D32)),
-            ('Negociación', const Color(0xFFFFEB3B)),
             ('No liberado', const Color(0xFFD32F2F)),
             ('Sin estatus', const Color(0xFF757575)),
           ]
@@ -2068,32 +2162,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               ),
             ),
           ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(3),
-                  border: Border.all(
-                    color: const Color(0xFFFFD54F),
-                    width: 2,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Estación',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: Colors.grey[800],
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
@@ -2101,133 +2169,70 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
     final props = feature.properties;
-    final displayClave = _getClaveFromFeature(props);
-    final campos = <String, String>{
-      'PROYECTO': _readFeatureProperty(
-        props,
-        const ['PROYECTO', 'PROY'],
-        fragmentGroups: const [
-          ['PROYECT'],
-        ],
-      ),
-      'CLAVE': _getClaveFromFeature(props),
-      'PROPIETARIO': _readFeatureProperty(
-        props,
-        const ['PROPIETARIO', 'PROPIETARIO_NOMBRE', 'NOMBRE_PROPIETARIO'],
-        fragmentGroups: const [
-          ['PROPIE'],
-        ],
-      ),
-      'SEGMENTO': _getSegmentoFromFeature(props),
-      'ESTATUS': _getEstatusFromFeature(props),
-      'KM INICIO': _getKmInicioFromFeature(props),
-      'KM FIN': _getKmFinFromFeature(props),
-      'KM LINEALES': _readFeatureProperty(
-        props,
-        const ['KM LINEALES', 'KM_LINEALES', 'KMLINEALES'],
-        fragmentGroups: const [
-          ['KM', 'LINEAL'],
-        ],
-      ),
-      'COP': _readFeatureFlagValue(
-        props,
-        _isCOPFirmado(props),
-        const ['COP', 'C.O.P'],
-        fragmentGroups: const [
-          ['COP'],
-        ],
-      ),
-      'IDENTIFICACION': _readFeatureFlagValue(
-        props,
-        _isIdentificacionComplete(props),
-        const ['IDENTIFICACION', 'IDENTIFICACIÓN'],
-        fragmentGroups: const [
-          ['IDENTIFICA'],
-        ],
-      ),
-      'LEVANTAMIENTO': _readFeatureFlagValue(
-        props,
-        _isLevantamientoComplete(props),
-        const ['LEVANTAMIENTO'],
-        fragmentGroups: const [
-          ['LEVANTAMIE'],
-        ],
-      ),
-      'NEGOCIACION': _readFeatureFlagValue(
-        props,
-        _isNegociacionActive(props),
-        const ['NEGOCIACION', 'NEGOCIACIÓN'],
-        fragmentGroups: const [
-          ['NEGOCIACION'],
-        ],
-      ),
-      'ANUENCIA': _readFeatureFlagValue(
-        props,
-        _isValueTrue(_readFeatureProperty(
-          props,
-          const ['ANUENCIA'],
-          fragmentGroups: const [
-            ['ANUENCIA'],
-          ],
-        )),
-        const ['ANUENCIA'],
-        fragmentGroups: const [
-          ['ANUENCIA'],
-        ],
-      ),
-      'TIPO DE PROPIEDAD': _getTipoPropiedadFromFeature(props),
-      'MUNICIPIO': _readFeatureProperty(
-        props,
-        const ['MUNICIPIO'],
-        fragmentGroups: const [
-          ['MUNICIPIO'],
-        ],
-      ),
-      'ESTADO': _readFeatureProperty(
-        props,
-        const ['ESTADO'],
-        fragmentGroups: const [
-          ['ESTADO'],
-        ],
-      ),
-      'ESTRUCTURA': _readFeatureProperty(
-        props,
-        const ['ESTRUCTURA'],
-        fragmentGroups: const [
-          ['ESTRUCT'],
-        ],
-      ),
-      'M2': _readFeatureProperty(
-        props,
-        const ['M2', 'SUPERFICIE'],
-        fragmentGroups: const [
-          ['SUPERFIC'],
-        ],
-      ),
-      'NUEVO': _readFeatureFlagValue(
-        props,
-        _isValueTrue(_readFeatureProperty(
-          props,
-          const ['NUEVO'],
-          fragmentGroups: const [
-            ['NUEVO'],
-          ],
-        )),
-        const ['NUEVO'],
-        fragmentGroups: const [
-          ['NUEVO'],
-        ],
-      ),
-      'OBSERVACIONES': _readFeatureProperty(
-        props,
-        const ['OBSERVACIONES', 'OBSERVACION', 'OBS', 'NOTAS', 'COMENTARIOS'],
-        fragmentGroups: const [
-          ['OBSERV'],
-          ['NOTA'],
-          ['COMENT'],
-        ],
-      ),
-    };
+    final clave = _getClaveFromFeature(props);
+    final proyecto = _tipoProyectoLabel(
+      _extractPropertyByKeyFragments(props, ['PROYECTO']),
+    );
+    final estatus = _getEstatusFromFeature(props);
+    final segmento = _getSegmentoFromFeature(props);
+    final kmInicio = _getKmInicioFromFeature(props);
+    final kmFin = _getKmFinFromFeature(props);
+    final kmLineales = _extractPropertyByKeyFragments(
+      props,
+      ['KM', 'LINEAL'],
+    );
+    final tipoPropiedad = _getTipoPropiedadFromFeature(props);
+    final propietario = _extractPropertyByKeyFragments(
+      props,
+      ['PROPIETARIO'],
+      fallbackFragments: ['TITULAR', 'REGISTRAL'],
+    );
+    final municipio = _getMunicipioFromFeature(props);
+    final estado = _getEstadoFromFeature(props);
+    final frente = _extractPropertyByKeyFragments(
+      props,
+      ['FRENTE'],
+      fallbackFragments: ['FRENTE'],
+    );
+    final anuencia = _extractPropertyByKeyFragments(props, ['ANUENCIA']);
+    final estructura = _extractPropertyByKeyFragments(props, ['ESTRUCTURA']);
+    final m2 = _extractPropertyByKeyFragments(
+      props,
+      ['M2'],
+      fallbackFragments: ['SUP', 'AFECT'],
+    );
+    final nuevo = _extractPropertyByKeyFragments(props, ['NUEVO']);
+    final observaciones = _extractPropertyByKeyFragments(
+      props,
+      ['OBSERVA'],
+      fallbackFragments: ['ACERCAMIENTO'],
+    );
+    final folioElectronico = _extractPropertyByKeyFragments(
+      props,
+      ['FOLIO', 'ELECTR'],
+    );
+    final sujetoAgrario = _extractPropertyByKeyFragments(
+      props,
+      ['SUJETO', 'AGRARIO'],
+      fallbackFragments: ['SUJ', 'AGRAR'],
+    );
+    final poseedor = _extractPropertyByKeyFragments(props, ['POSEEDOR']);
+    final valorCatastral = _extractPropertyByKeyFragments(
+      props,
+      ['VALOR', 'CATASTRAL'],
+    );
+    final valorComercial = _extractPropertyByKeyFragments(
+      props,
+      ['VALOR', 'COMERCIAL'],
+    );
+    final negociado = _extractPropertyByKeyFragments(props, ['NEGOCI']);
+    final acercamiento = _extractPropertyByKeyFragments(props, ['ACERCAMIENTO']);
+    final convenioFirmado = _extractPropertyByKeyFragments(
+      props,
+      ['CONVENIO'],
+    );
+    final montoTotal = _extractPropertyByKeyFragments(props, ['MONTO']);
+    final pago = _extractPropertyByKeyFragments(props, ['PAGO']);
 
     return Container(
       decoration: const BoxDecoration(
@@ -2254,7 +2259,16 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        displayClave.isEmpty ? feature.id : displayClave,
+                        'Feature GeoJSON',
+                        style: GoogleFonts.inter(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        feature.id,
                         style: GoogleFonts.inter(
                           color: Colors.white,
                           fontSize: 15,
@@ -2284,35 +2298,104 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   // Sección de información principal
                   _sectionTitle('Información'),
                   const SizedBox(height: 8),
-                  ...[
-                    'PROYECTO',
-                    'CLAVE',
-                    'PROPIETARIO',
-                    'SEGMENTO',
-                    'ESTATUS',
-                    'KM INICIO',
-                    'KM FIN',
-                    'KM LINEALES',
-                    'COP',
-                    'IDENTIFICACION',
-                    'LEVANTAMIENTO',
-                    'NEGOCIACION',
-                    'ANUENCIA',
-                    'TIPO DE PROPIEDAD',
-                    'MUNICIPIO',
-                    'ESTADO',
-                    'ESTRUCTURA',
-                    'M2',
-                    'NUEVO',
-                    'OBSERVACIONES',
-                  ].map((campo) => Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _infoRow(campo, campos[campo] ?? ''),
-                          const SizedBox(height: 4),
-                        ],
-                      )),
-                  const SizedBox(height: 8),
+                  _infoRow('Proyecto', proyecto),
+                  if (clave.isNotEmpty)
+                    _infoRow('Clave/Clave SEDATU', clave)
+                  else
+                    _infoRow('Clave/Clave SEDATU', ''),
+                  if (propietario.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Propietario', propietario),
+                  ],
+                  if (estatus.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Estatus', estatus),
+                  ],
+                  if (kmInicio.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('KM Inicio', kmInicio),
+                  ],
+                  if (kmFin.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('KM Fin', kmFin),
+                  ],
+                  if (kmLineales.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('KM Lineales', kmLineales),
+                  ],
+                  if (segmento.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Segmento', segmento),
+                  ],
+                  if (tipoPropiedad.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Tipo de Propiedad', tipoPropiedad),
+                  ],
+                  if (frente.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Frente', frente),
+                  ],
+                  if (municipio.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Municipio', municipio),
+                  ],
+                  if (estado.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Estado', estado),
+                  ],
+                  if (anuencia.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Anuencia', anuencia),
+                  ],
+                  if (estructura.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Estructura', estructura),
+                  ],
+                  if (m2.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('M2', m2),
+                  ],
+                  if (nuevo.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Nuevo', nuevo),
+                  ],
+                  if (observaciones.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Observaciones', observaciones),
+                  ],
+                  if (folioElectronico.isNotEmpty ||
+                      sujetoAgrario.isNotEmpty ||
+                      poseedor.isNotEmpty ||
+                      valorCatastral.isNotEmpty ||
+                      valorComercial.isNotEmpty ||
+                      negociado.isNotEmpty ||
+                      acercamiento.isNotEmpty ||
+                      convenioFirmado.isNotEmpty ||
+                      montoTotal.isNotEmpty ||
+                      pago.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _sectionTitle('Datos complementarios TAP'),
+                    const SizedBox(height: 8),
+                    if (folioElectronico.isNotEmpty)
+                      _infoRow('Folio electrónico', folioElectronico),
+                    if (sujetoAgrario.isNotEmpty)
+                      _infoRow('Sujeto agrario', sujetoAgrario),
+                    if (poseedor.isNotEmpty) _infoRow('Poseedor', poseedor),
+                    if (valorCatastral.isNotEmpty)
+                      _infoRow('Valor catastral', valorCatastral),
+                    if (valorComercial.isNotEmpty)
+                      _infoRow('Valor comercial', valorComercial),
+                    if (negociado.isNotEmpty)
+                      _infoRow('Negociado', negociado),
+                    if (acercamiento.isNotEmpty)
+                      _infoRow('Acercamiento', acercamiento),
+                    if (convenioFirmado.isNotEmpty)
+                      _infoRow('Convenio firmado', convenioFirmado),
+                    if (montoTotal.isNotEmpty)
+                      _infoRow('Monto total', montoTotal),
+                    if (pago.isNotEmpty) _infoRow('Pago', pago),
+                  ],
+                  const SizedBox(height: 16),
                   // Sección de estado de gestión (checklist)
                   _sectionTitle('Estado de Gestión'),
                   const SizedBox(height: 8),
@@ -2345,44 +2428,51 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   /// Extrae clave del feature (busca en CLAVE o NOM_SEDATU)
   String _getClaveFromFeature(Map<String, dynamic> properties) {
-    return _readFeatureProperty(
-      properties,
-      const ['CLAVE', 'NOM_SEDATU', 'ID', 'FID'],
-      fragmentGroups: const [
-        ['SEDATU'],
-      ],
-    );
+    final keys = properties.keys.toList();
+    // Busca CLAVE (exacta o case-insensitive)
+    for (final key in keys) {
+      if (key.toUpperCase() == 'CLAVE') {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    // Busca NOM_SEDATU o variantes
+    for (final key in keys) {
+      if (key.toUpperCase().contains('SEDATU')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
   }
 
   /// Extrae estatus (busca ESTATUS con normalización de valores)
   String _getEstatusFromFeature(Map<String, dynamic> properties) {
-    final value = _readFeatureProperty(
-      properties,
-      const ['ESTATUS', 'ESTADO'],
-      fragmentGroups: const [
-        ['STATUS'],
-      ],
-    );
-    if (value.isEmpty) return '';
-    final normalized = _normalizedStatus(value);
-    if (normalized == 'liberado') return 'Liberado';
-    if (normalized == 'no_liberado' || normalized == 'noliberado') {
-      return 'No liberado';
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase() == 'ESTATUS') {
+        final value = properties[key]?.toString().trim() ?? '';
+        if (value.isEmpty || value.toUpperCase() == 'NONE') return '';
+        final normalized = _normalizedStatus(value);
+        if (normalized == 'liberado') return 'Liberado';
+        if (normalized == 'no_liberado' || normalized == 'noliberado') {
+          return 'No liberado';
+        }
+        return value;
+      }
     }
-    return value;
+    return '';
   }
 
   /// Extrae segmento
   String _getSegmentoFromFeature(Map<String, dynamic> properties) {
-    final raw = _readFeatureProperty(
-      properties,
-      const ['SEGMENTO', 'TRAMO'],
-      fragmentGroups: const [
-        ['SEG'],
-      ],
-    );
-    if (raw.isNotEmpty) {
-      return raw;
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      if (key.toUpperCase() == 'SEGMENTO') {
+        final value = properties[key];
+        final raw = value?.toString().trim() ?? '';
+        if (raw.isNotEmpty && raw.toUpperCase() != 'NONE') return raw;
+      }
     }
 
     final clave = _getClaveFromFeature(properties);
@@ -2401,48 +2491,44 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   /// Extrae KM Inicio
   String _getKmInicioFromFeature(Map<String, dynamic> properties) {
-    return _readFeatureProperty(
-      properties,
-      const ['KM INICIO', 'KM_INICIO', 'KMINICIO', 'INICIO KM'],
-      fragmentGroups: const [
-        ['KM', 'INICIO'],
-        ['KILOMETRO', 'INICIO'],
-      ],
-    );
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('KM') && upper.contains('INICIO')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
   }
 
   /// Extrae KM Fin
   String _getKmFinFromFeature(Map<String, dynamic> properties) {
-    return _readFeatureProperty(
-      properties,
-      const ['KM FIN', 'KM_FIN', 'KMFIN', 'FIN KM'],
-      fragmentGroups: const [
-        ['KM', 'FIN'],
-        ['KILOMETRO', 'FIN'],
-      ],
-    );
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('KM') && upper.contains('FIN')) {
+        final value = properties[key];
+        return value?.toString().trim() ?? '';
+      }
+    }
+    return '';
   }
 
   /// Extrae tipo de propiedad (Privada o Social)
   String _getTipoPropiedadFromFeature(Map<String, dynamic> properties) {
-    final value = _readFeatureProperty(
-      properties,
-      const [
-        'TIPO PROPIEDAD',
-        'TIPO_PROPIEDAD',
-        'TIPOPROPIEDAD',
-        'CLASIFICACION',
-        'CLASIFICACIÓN',
-      ],
-      fragmentGroups: const [
-        ['TIPO', 'PROPIEDAD'],
-        ['CLASIF'],
-      ],
-    );
-    if (value.isEmpty) return '';
-    if (value.toUpperCase().contains('PRIV')) return 'Privada';
-    if (value.toUpperCase().contains('SOC')) return 'Social';
-    return value;
+    final keys = properties.keys.toList();
+    for (final key in keys) {
+      final upper = key.toUpperCase();
+      if (upper.contains('TIPO') && upper.contains('PROPIEDAD')) {
+        final value = properties[key]?.toString().trim() ?? '';
+        // Normaliza a Privada o Social
+        if (value.toUpperCase().contains('PRIV')) return 'Privada';
+        if (value.toUpperCase().contains('SOC')) return 'Social';
+        return value;
+      }
+    }
+    return '';
   }
 
   /// Verifica si la identificación está completada
@@ -2453,6 +2539,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _isValueTrue(properties[key]);
       }
     }
+
+    final acercamiento = _extractPropertyByKeyFragments(
+      properties,
+      ['ACERCAMIENTO'],
+    );
+    if (_isValueTrue(acercamiento) || _hasMeaningfulValue(acercamiento)) {
+      return true;
+    }
+
+    final entregado = _extractPropertyByKeyFragments(properties, ['ENTREGADO']);
+    if (_isValueTrue(entregado)) return true;
+
     return false;
   }
 
@@ -2464,6 +2562,26 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _isValueTrue(properties[key]);
       }
     }
+
+    final medicionPoligono = _extractPropertyByKeyFragments(
+      properties,
+      ['MEDICION', 'POLIGONO'],
+    );
+    if (_isValueTrue(medicionPoligono) || _hasMeaningfulValue(medicionPoligono)) {
+      return true;
+    }
+
+    final medicionBdt = _extractPropertyByKeyFragments(
+      properties,
+      ['MEDICION', 'BDT'],
+    );
+    if (_isValueTrue(medicionBdt) || _hasMeaningfulValue(medicionBdt)) {
+      return true;
+    }
+
+    final plano = _extractPropertyByKeyFragments(properties, ['PLANO']);
+    if (_isValueTrue(plano) || _hasMeaningfulValue(plano)) return true;
+
     return false;
   }
 
@@ -2475,6 +2593,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _isValueTrue(properties[key]);
       }
     }
+
+    final negociado = _extractPropertyByKeyFragments(properties, ['NEGOCIADO']);
+    if (_isValueTrue(negociado) || _hasMeaningfulValue(negociado)) return true;
+
+    final estatus = _getEstatusFromFeature(properties);
+    if (_normalizedStatus(estatus).contains('negociacion')) return true;
+
     return false;
   }
 
@@ -2485,32 +2610,73 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final upper = key.toUpperCase();
       if (upper.contains('COP') || upper.contains('C.O.P')) {
         final value = properties[key]?.toString().trim().toUpperCase() ?? '';
-        // COP está firmado si el valor es "COP", "AOP" o similar (no "NO")
-        return value == 'COP' || value == 'AOP';
+        if (_isValueTrue(value)) return true;
       }
     }
+
+    final convenioFirmado = _extractPropertyByKeyFragments(
+      properties,
+      ['CONVENIO'],
+    );
+    if (_isValueTrue(convenioFirmado)) return true;
+
+    final fechaCop = _extractPropertyByKeyFragments(properties, ['FECHA', 'COP']);
+    if (_hasMeaningfulValue(fechaCop)) return true;
+
     return false;
   }
 
   /// Helper para determinar si un valor es "truthy"
   bool _isValueTrue(dynamic value) {
     if (value == null) return false;
-    final str = value.toString().trim().toLowerCase();
-    return str == 'sí' ||
-      str == 'si' ||
-      str == 'yes' ||
-      str == '1' ||
-      str == 'true' ||
-      str == 'cop' ||
-      str == 'aop';
+    final str = value.toString().trim().toUpperCase();
+    return str == 'SÍ' ||
+        str == 'SI' ||
+        str == 'YES' ||
+        str == '1' ||
+        str == 'TRUE' ||
+        str == 'FIRMADO' ||
+        str == 'OK' ||
+        str == 'COP' ||
+        str == 'AOP';
+  }
+
+  bool _hasMeaningfulValue(String value) {
+    final str = value.trim().toUpperCase();
+    if (str.isEmpty) return false;
+    const negatives = {
+      'NO',
+      '0',
+      'FALSE',
+      'N/A',
+      'NA',
+      'NONE',
+      'NULL',
+      'N/D',
+      'ND',
+      'SIN DATO',
+      'NO APLICA',
+    };
+    return !negatives.contains(str);
   }
 
   /// Widget que muestra el checklist de gestión
   Widget _buildGestionChecklistForFeature(Map<String, dynamic> properties) {
-    final hasIdentificacion = _isIdentificacionComplete(properties);
-    final hasLevantamiento = _isLevantamientoComplete(properties);
-    final hasNegociacion = _isNegociacionActive(properties);
-    final hasCOPFirmado = _isCOPFirmado(properties);
+    final isTapFeature =
+        _tipoProyectoLabel(_extractPropertyByKeyFragments(properties, ['PROYECTO'])) ==
+            'TAP';
+    final isFeatureLiberado =
+        _normalizedStatus(_getEstatusFromFeature(properties)) == 'liberado';
+    final forceGreenGestion = isTapFeature && isFeatureLiberado;
+    final hasCOPFirmado = forceGreenGestion || _isCOPFirmado(properties);
+    final hasIdentificacion =
+        forceGreenGestion ||
+        _isIdentificacionComplete(properties) ||
+        hasCOPFirmado;
+    final hasLevantamiento =
+        forceGreenGestion || _isLevantamientoComplete(properties);
+    final hasNegociacion =
+        forceGreenGestion || _isNegociacionActive(properties);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2696,6 +2862,31 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     });
   }
 
+  LatLng? _extractRepresentativePoint(Map<String, dynamic> geo) {
+    final type = geo['type'] as String?;
+    if (type == 'Point') {
+      final coords = geo['coordinates'] as List?;
+      if (coords == null || coords.length < 2) return null;
+      final lon = (coords[0] as num?)?.toDouble();
+      final lat = (coords[1] as num?)?.toDouble();
+      if (lat == null || lon == null) return null;
+      return LatLng(lat, lon);
+    }
+
+    if (type == 'MultiPoint') {
+      final coords = geo['coordinates'] as List?;
+      if (coords == null || coords.isEmpty) return null;
+      final first = coords.first;
+      if (first is! List || first.length < 2) return null;
+      final lon = (first[0] as num?)?.toDouble();
+      final lat = (first[1] as num?)?.toDouble();
+      if (lat == null || lon == null) return null;
+      return LatLng(lat, lon);
+    }
+
+    return null;
+  }
+
   List<LatLng> _simplifyGeometryForZoom(
     List<LatLng> points,
     double zoom, {
@@ -2703,17 +2894,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }) {
     if (points.length < 8) return points;
 
-    // No simplificar poligonos: evitar cortes/desaparicion de geometria al zoom out.
-    if (isPolygon) return points;
-
-    // Conserva una simplificacion leve solo en lineas para no degradar tanto el render.
     final stride = zoom >= 13
-      ? 1
-      : zoom >= 12
-        ? 2
-        : zoom >= 11
-          ? 3
-          : 5;
+        ? 1
+        : zoom >= 12
+            ? 2
+            : zoom >= 11
+                ? 3
+                : 5;
     if (stride <= 1) return points;
 
     final sampled = <LatLng>[];
@@ -2769,10 +2956,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<Predio> _applyAllFilters(List<Predio> predios) {
-    // "Solo Estaciones" incluye capas importadas y predios marcados como estación.
-    if (_filterSoloEstaciones) {
-      return predios.where(_isPredioStation).toList();
-    }
+    // "Solo Estaciones" aplica a capas importadas; ocultar capa base de predios.
+    if (_filterSoloEstaciones) return const [];
 
     final liberacion = _applyLiberacionFilter(predios);
     var filtered = liberacion;
@@ -2782,29 +2967,29 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         return _selectedTipoProyectos.contains(label);
       }).toList();
     }
+    if (_selectedClasificaciones.isNotEmpty) {
+      filtered = filtered.where((p) {
+        final tipo = p.tipoPropiedad.toUpperCase().trim();
+        final clasificacion =
+            tipo == 'SOCIAL' ? 'Pública' : (tipo == 'PRIVADA' ? 'Privada' : 'Sin clasificación');
+        return _selectedClasificaciones.contains(clasificacion);
+      }).toList();
+    }
+    if (_selectedEjidos.isNotEmpty) {
+      filtered = filtered.where((p) {
+        final key = _normalizeFilterDimensionValue(
+          p.ejido ?? '',
+          emptyLabel: 'Sin ejido',
+        );
+        return _selectedEjidos.contains(key);
+      }).toList();
+    }
     if (_selectedMunicipios.isNotEmpty) {
       filtered = filtered.where((p) {
         final value = (p.municipio ?? p.ejido ?? '').trim();
         if (_selectedMunicipios.contains('Sin municipio') && value.isEmpty) return true;
         final normalized = _normalizeMunicipioName(value);
         return _selectedMunicipios.any((m) => _normalizeMunicipioName(m) == normalized);
-      }).toList();
-    }
-    if (_selectedEjidos.isNotEmpty) {
-      filtered = filtered.where((p) {
-        final value = (p.ejido ?? '').trim();
-        if (_selectedEjidos.contains('Sin ejido') && value.isEmpty) return true;
-        if (value.isEmpty) return false;
-        return _selectedEjidos.contains(value);
-      }).toList();
-    }
-    if (_selectedClasificaciones.isNotEmpty) {
-      filtered = filtered.where((p) {
-        final tipo = p.tipoPropiedad.toUpperCase().trim();
-        final value = tipo == 'SOCIAL'
-            ? 'Pública'
-            : (tipo == 'PRIVADA' ? 'Privada' : 'Sin clasificación');
-        return _selectedClasificaciones.contains(value);
       }).toList();
     }
     if (_selectedEstatus.isNotEmpty) {
@@ -2870,89 +3055,42 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return value;
   }
 
-  String _normalizeForMatch(String input) {
-    return input
-        .toLowerCase()
+  bool _isEnvolventePredio(Predio predio) {
+    return _containsEnvolventeKeyword(predio.proyecto) ||
+        _containsEnvolventeKeyword(predio.tramo) ||
+        _containsEnvolventeKeyword(predio.clasificacionAfectacion) ||
+        _containsEnvolventeKeyword(predio.claveCatastral);
+  }
+
+  bool _containsEnvolventeKeyword(String? value) {
+    final normalized = (value ?? '')
         .trim()
+        .toLowerCase()
         .replaceAll('á', 'a')
         .replaceAll('é', 'e')
         .replaceAll('í', 'i')
         .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ü', 'u')
-        .replaceAll('ñ', 'n');
-  }
-
-  bool _isStationFeature(GeoJsonPredioFeature feature) {
-    if (feature.esEstacion) return true;
-
-    final sourceAsset =
-        _normalizeForMatch((feature.properties['__source_asset'] ?? '').toString());
-    if (sourceAsset.contains('estaciones_y_edificios') ||
-        sourceAsset.contains('estacion') ||
-        sourceAsset.contains('edificios_auxiliares') ||
-        sourceAsset.contains('edificio_auxiliar')) {
-      return true;
-    }
-
-    final estructura = _normalizeForMatch(
-      (feature.properties['ESTRUCTURA'] ?? feature.properties['estructura'] ?? '')
-          .toString(),
-    );
-    if (estructura.contains('estacion') || estructura.contains('edificio')) {
-      return true;
-    }
-
-    for (final entry in feature.properties.entries) {
-      final key = _normalizeForMatch(entry.key);
-      if (!key.contains('estructura') &&
-          !key.contains('tipo') &&
-          !key.contains('clasifica') &&
-          !key.contains('uso')) {
-        continue;
-      }
-      final value = _normalizeForMatch((entry.value ?? '').toString());
-      if (value.contains('estacion') || value.contains('edificio auxiliar')) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  bool _isPredioStation(Predio predio) {
-    final tipo = _normalizeForMatch(predio.tipoPropiedad);
-    if (tipo.contains('estacion') || tipo.contains('edificio auxiliar')) {
-      return true;
-    }
-
-    final clasificacion =
-        _normalizeForMatch(predio.clasificacionAfectacion ?? '');
-    if (clasificacion.contains('estacion') ||
-        clasificacion.contains('edificio auxiliar')) {
-      return true;
-    }
-
-    return false;
+        .replaceAll('ú', 'u');
+    return normalized.contains('envolvente');
   }
 
   List<GeoJsonPredioFeature> _applyAllImportedFilters(
     List<GeoJsonPredioFeature> features,
   ) {
     // Separar envolventes (SIEMPRE visibles)
-    var envolventes = features.where((f) => f.esEnvolvente).toList();
+    final envolventes = features.where((f) => f.esEnvolvente).toList();
     var nonEnvolventes = features.where((f) => !f.esEnvolvente).toList();
 
     // Si Solo Estaciones está activo: SOLO estaciones (+ envolventes al final)
     if (_filterSoloEstaciones) {
       final soloEstaciones =
-          nonEnvolventes.where(_isStationFeature).toList();
+          nonEnvolventes.where((f) => f.esEstacion).toList();
       // Retornar: estaciones + envolventes siempre
       return [...soloEstaciones, ...envolventes];
     }
 
-    // En modo normal, mostrar todas las features no envolventes.
-    var filtered = nonEnvolventes;
+    // En modo normal, ocultar estaciones/servicios auxiliares.
+    var filtered = nonEnvolventes.where((f) => !f.esEstacion).toList();
 
     // Aplicar otros filtros solo si NO está "Solo Estaciones"
     if (_liberacionFilter != _LiberacionFilter.todos) {
@@ -2972,31 +3110,24 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     if (_selectedTipoProyectos.isNotEmpty) {
       filtered = filtered.where((feature) {
-        final value = _tipoProyectoLabel(feature.properties['PROYECTO']?.toString());
-        return _selectedTipoProyectos.contains(value);
-      }).toList();
-    }
-
-    if (_selectedEjidos.isNotEmpty) {
-      filtered = filtered.where((feature) {
-        final value =
-            (feature.properties['EJIDO'] ?? feature.properties['ejido'] ?? '')
-                .toString()
-                .trim();
-        if (_selectedEjidos.contains('Sin ejido') && value.isEmpty) return true;
-        if (value.isEmpty) return false;
-        return _selectedEjidos.contains(value);
+        final label = _tipoProyectoLabel(feature.properties['PROYECTO']?.toString());
+        return _selectedTipoProyectos.contains(label);
       }).toList();
     }
 
     if (_selectedClasificaciones.isNotEmpty) {
       filtered = filtered.where((feature) {
-        final tipo = _getTipoPropiedadFromFeature(feature.properties).trim();
-        final normalizedTipo = tipo.toUpperCase();
-        final value = normalizedTipo.contains('SOC')
-            ? 'Pública'
-            : (normalizedTipo.contains('PRIV') ? 'Privada' : 'Sin clasificación');
-        return _selectedClasificaciones.contains(value);
+        final clasificacion = _getTipoPropiedadFromFeature(feature.properties);
+        final label = clasificacion.isEmpty ? 'Sin clasificación' : clasificacion;
+        return _selectedClasificaciones.contains(label);
+      }).toList();
+    }
+
+    if (_selectedEjidos.isNotEmpty) {
+      filtered = filtered.where((feature) {
+        final value = _getEjidoFromFeature(feature.properties).trim();
+        final key = value.isEmpty ? 'Sin ejido' : value;
+        return _selectedEjidos.contains(key);
       }).toList();
     }
 
@@ -3021,19 +3152,53 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
-    // Eliminar duplicados exactos sin mezclar datasets diferentes.
-    final unique = <String, GeoJsonPredioFeature>{};
-    for (final f in [...filtered, ...envolventes]) {
-      final source = (f.properties['__source_asset'] ?? '')
-          .toString()
-          .toLowerCase()
-          .trim();
-      final typeKey = f.esEnvolvente ? 'envolvente' : 'predio';
-      final geom = jsonEncode(f.geometry);
-      final dedupeKey = '$typeKey|$source|$geom';
-      unique.putIfAbsent(dedupeKey, () => f);
-    }
-    return unique.values.toList();
+    // Retornar: contenido filtrado + envolventes siempre visibles
+    return [...filtered, ...envolventes];
+  }
+
+  String _getEjidoFromFeature(Map<String, dynamic> properties) {
+    final raw = _extractPropertyByKeyFragments(
+      properties,
+      ['EJIDO'],
+      fallbackFragments: ['LOCALIDAD'],
+    );
+    return _normalizeFilterDimensionValue(raw, emptyLabel: 'Sin ejido');
+  }
+
+  String _normalizeFilterDimensionValue(
+    String value, {
+    required String emptyLabel,
+  }) {
+    final raw = value.trim();
+    if (raw.isEmpty) return emptyLabel;
+    if (RegExp(r'^[-_.\s]+$').hasMatch(raw)) return emptyLabel;
+
+    final normalized = raw
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    const invalidTokens = {
+      'null',
+      'none',
+      'na',
+      'n/a',
+      'n.d',
+      'n/d',
+      'nd',
+      'sin dato',
+      's/d',
+      's.d',
+    };
+    if (invalidTokens.contains(normalized)) return emptyLabel;
+
+    return raw;
   }
 
   String _getMunicipioFromFeature(Map<String, dynamic> properties) {
@@ -3261,22 +3426,29 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   Widget _buildFocusGeoJsonButton(List<GeoJsonPredioFeature> importedGeoJsonPredios) {
-    return Tooltip(
-      message: 'Centrar',
-      child: Material(
-        color: Colors.white,
-        elevation: 6,
+    return Material(
+      color: Colors.white,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => _focusImportedGeoJsonNow(importedGeoJsonPredios),
-          child: const Padding(
-            padding: EdgeInsets.all(8),
-            child: Icon(
-              Icons.my_location_rounded,
-              size: 18,
-              color: Color(0xFF444444),
-            ),
+        onTap: () => _focusImportedGeoJsonNow(importedGeoJsonPredios),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.my_location_rounded, size: 18, color: Color(0xFF444444)),
+              const SizedBox(width: 6),
+              Text(
+                'Ir a GeoJSON',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF444444),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -3427,7 +3599,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   double _bucketSizeForZoom(double zoom) {
-    if (zoom >= 15) return 0;
+    if (zoom >= 17) return 0.0025;
+    if (zoom >= 15) return 0.004;
     if (zoom >= 13) return 0.008;
     if (zoom >= 11) return 0.015;
     if (zoom >= 9) return 0.03;
@@ -3507,7 +3680,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     if (_baseLayer == _BaseLayer.satelital) {
       return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
     }
-    return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    return 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
   }
 
   Widget _buildLayersDropdown() {
