@@ -43,7 +43,7 @@ jobs:
 
 
       - name: Build web
-        run: flutter build web --release --base-href /geoportal_consulta/
+        run: flutter build web --release --pwa-strategy=none --base-href /geoportal_consulta/
 
       - name: Copiar archivos GeoJSON a build web
         run: |
