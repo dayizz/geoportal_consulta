@@ -370,6 +370,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     }
 
     for (final feature in filteredImportedGeoJson) {
+      final isEnvelopeFeature = _isEnvelopeFeature(feature);
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
       LatLng? markerPoint = _extractRepresentativePoint(feature.geometry);
@@ -377,7 +378,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
       final isPkAsset = sourceAsset.endsWith('pks.geojson');
       final estatus = feature.estatus?.trim().toLowerCase();
-      final fillColor = feature.esEnvolvente
+        final fillColor = isEnvelopeFeature
           ? const Color(0xFF1976D2)
           : (estatus == 'liberado'
               ? const Color(0xFFCDDC39)
@@ -398,7 +399,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: true,
         );
         if (drawRing.length < 3) continue;
-        final targetPolygons = feature.esEnvolvente
+        final targetPolygons = isEnvelopeFeature
             ? envolventePolygons
             : importedPolygons;
         targetPolygons.add(
@@ -420,7 +421,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: false,
         );
         if (drawLine.length < 2) continue;
-        final targetPolylines = feature.esEnvolvente
+        final targetPolylines = isEnvelopeFeature
             ? envolventePolylines
             : importedPolylines;
         targetPolylines.add(
@@ -433,7 +434,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         markerPoint ??= _centroid(line);
       }
 
-      if (_mostrarEtiquetas && markerPoint != null && !feature.esEnvolvente) {
+      if (_mostrarEtiquetas && markerPoint != null && !isEnvelopeFeature) {
         final sedatuClave = _getClaveFromFeature(feature.properties);
         if (sedatuClave.isNotEmpty) {
           sedatuLabelMarkers.add(
@@ -449,7 +450,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         continue;
       }
 
-      if (shouldDrawImportedGroups() && markerPoint != null && !feature.esEnvolvente) {
+      if (shouldDrawImportedGroups() && markerPoint != null && !isEnvelopeFeature) {
         final bucket = _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
         final estatusLower = feature.estatus?.trim().toLowerCase() ?? '';
         if (estatusLower == 'liberado') bucket.liberados++;
@@ -548,7 +549,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         onTap: (_, point) {
           final tappedPredio = _findPredioAtPoint(point, filteredPredios);
           final nonEnvolventes =
-              filteredImportedGeoJson.where((f) => !f.esEnvolvente).toList();
+              filteredImportedGeoJson.where((f) => !_isEnvelopeFeature(f)).toList();
           final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
           setState(() {
             // Muestra solo una ficha: prioriza la última ficha implementada
@@ -1063,7 +1064,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion)
       .toList();
     final liberacionFiltered = _applyLiberacionFilter(prediosOperative);
     final filteredPredios = _applyAllFilters(prediosOperative);
@@ -1325,7 +1326,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) async {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !f.esEnvolvente && !f.esEstacion)
+      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion)
       .toList();
     final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
@@ -3078,8 +3079,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<GeoJsonPredioFeature> features,
   ) {
     // Separar envolventes (SIEMPRE visibles)
-    final envolventes = features.where((f) => f.esEnvolvente).toList();
-    var nonEnvolventes = features.where((f) => !f.esEnvolvente).toList();
+    final envolventes = features.where(_isEnvelopeFeature).toList();
+    var nonEnvolventes = features.where((f) => !_isEnvelopeFeature(f)).toList();
 
     // Si Solo Estaciones está activo: SOLO estaciones (+ envolventes al final)
     if (_filterSoloEstaciones) {
@@ -3154,6 +3155,26 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     // Retornar: contenido filtrado + envolventes siempre visibles
     return [...filtered, ...envolventes];
+  }
+
+  bool _isEnvelopeFeature(GeoJsonPredioFeature feature) {
+    if (feature.esEnvolvente) return true;
+
+    final sourceAsset =
+        (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+    if (sourceAsset.contains('envolvente')) return true;
+    if (sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02')) {
+      return true;
+    }
+
+    final tipoCapa = _extractPropertyByKeyFragments(
+      feature.properties,
+      ['TIPO', 'CAPA'],
+    );
+    if (_containsEnvolventeKeyword(tipoCapa)) return true;
+
+    final clave = _getClaveFromFeature(feature.properties);
+    return _containsEnvolventeKeyword(clave);
   }
 
   String _getEjidoFromFeature(Map<String, dynamic> properties) {
