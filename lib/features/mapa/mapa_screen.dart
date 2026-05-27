@@ -1064,7 +1064,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion)
+      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion && !_isPkFeature(f))
       .toList();
     final liberacionFiltered = _applyLiberacionFilter(prediosOperative);
     final filteredPredios = _applyAllFilters(prediosOperative);
@@ -1326,7 +1326,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) async {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion)
+      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion && !_isPkFeature(f))
       .toList();
     final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
     await showGeneralDialog<void>(
@@ -3082,7 +3082,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) {
     // Separar envolventes (SIEMPRE visibles)
     final envolventes = features.where(_isEnvelopeFeature).toList();
-    var nonEnvolventes = features.where((f) => !_isEnvelopeFeature(f)).toList();
+    var nonEnvolventes = features
+        .where((f) => !_isEnvelopeFeature(f) && !_isPkFeature(f))
+        .toList();
 
     // Si Solo Estaciones está activo: SOLO estaciones (+ envolventes al final)
     if (_filterSoloEstaciones) {
@@ -3177,6 +3179,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     final clave = _getClaveFromFeature(feature.properties);
     return _containsEnvolventeKeyword(clave);
+  }
+
+  bool _isPkFeature(GeoJsonPredioFeature feature) {
+    final sourceAsset =
+        (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+    return sourceAsset.endsWith('pks.geojson') || sourceAsset.contains('/pks.geojson');
   }
 
   String _getEjidoFromFeature(Map<String, dynamic> properties) {
