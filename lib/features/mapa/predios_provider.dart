@@ -54,6 +54,16 @@ class GeoJsonPredioFeature {
   });
 }
 
+class PkGeoPoint {
+  final String pk;
+  final LatLng point;
+
+  const PkGeoPoint({
+    required this.pk,
+    required this.point,
+  });
+}
+
 class _MunicipioLookup {
   final String nombre;
   final String? estado;
@@ -593,3 +603,51 @@ Future<Map<String, dynamic>> autofillMunicipiosDesdeLimites({
   }
   return <String, dynamic>{};
 }
+
+final pksGeoJsonProvider =
+    FutureProvider.autoDispose<List<PkGeoPoint>>((ref) async {
+  try {
+    final raw = await rootBundle.loadString('assets/data/pks.geojson');
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) return const [];
+    final features = decoded['features'];
+    if (features is! List) return const [];
+
+    final points = <PkGeoPoint>[];
+    for (final item in features.whereType<Map>()) {
+      final feature = Map<String, dynamic>.from(item);
+      final props = Map<String, dynamic>.from(
+        (feature['properties'] as Map?) ?? const <String, dynamic>{},
+      );
+      final geometry = Map<String, dynamic>.from(
+        (feature['geometry'] as Map?) ?? const <String, dynamic>{},
+      );
+      if ((geometry['type'] as String?) != 'Point') continue;
+
+      final coords = geometry['coordinates'];
+      if (coords is! List || coords.length < 2) continue;
+      final lngRaw = coords[0];
+      final latRaw = coords[1];
+      if (lngRaw is! num || latRaw is! num) continue;
+      final lng = lngRaw.toDouble();
+      final lat = latRaw.toDouble();
+      if (!lng.isFinite || !lat.isFinite) continue;
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
+
+      String pk = '';
+      for (final entry in props.entries) {
+        final key = entry.key.toLowerCase().trim();
+        if (key == 'pk' || key == 'pks' || key.contains('pk')) {
+          pk = (entry.value ?? '').toString().trim();
+          if (pk.isNotEmpty) break;
+        }
+      }
+      if (pk.isEmpty) continue;
+
+      points.add(PkGeoPoint(pk: pk, point: LatLng(lat, lng)));
+    }
+    return points;
+  } catch (_) {
+    return const [];
+  }
+});

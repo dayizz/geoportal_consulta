@@ -132,6 +132,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _didImportedGeoJsonFocus = false;
   bool _groupingEnabled = true;
   bool _showPredioLabels = false;
+  bool _showPkLabels = false;
   Set<String> _segmentoQueries = {};
   String? _lastFocusedMunicipioKey;
   DateTime? _lastRefresh;
@@ -209,6 +210,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final prediosAsync = ref.watch(prediosConsultaProvider);
     final municipiosAsync = ref.watch(municipiosLimitesProvider);
     final importedGeoJsonAsync = ref.watch(importedGeoJsonPrediosProvider);
+    final pksAsync = ref.watch(pksGeoJsonProvider);
 
     return Scaffold(
       body: Stack(
@@ -221,6 +223,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               predios,
               municipiosAsync.valueOrNull ?? const [],
               importedGeoJsonAsync.valueOrNull ?? const [],
+              pksAsync.valueOrNull ?? const [],
             ),
           ),
 
@@ -292,6 +295,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     List<Predio> predios,
     List<MunicipioLimite> municipios,
     List<GeoJsonPredioFeature> importedGeoJsonPredios,
+    List<PkGeoPoint> pkGeoPoints,
   ) {
     final filteredPredios = _applyAllFilters(predios);
     final filteredImportedGeoJson = _applyAllImportedFilters(importedGeoJsonPredios);
@@ -305,6 +309,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final municipalPolylines = <Polyline>[];
     final markers = <Marker>[];
     final predioLabels = <Marker>[];
+    final pkLabels = <Marker>[];
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     final importedBucketed = <String, _HeatBucket>{};
@@ -506,6 +511,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
+    if (_showPkLabels) {
+      for (final pkPoint in pkGeoPoints) {
+        pkLabels.add(_buildPkLabelMarker(pkPoint));
+      }
+    }
+
     // Multi-municipio: resalta todos los seleccionados
     if (_selectedMunicipios.isNotEmpty) {
       for (final municipioSeleccionado in _selectedMunicipios) {
@@ -646,6 +657,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           MarkerLayer(markers: markers),
         if (predioLabels.isNotEmpty)
           MarkerLayer(markers: predioLabels),
+        if (pkLabels.isNotEmpty)
+          MarkerLayer(markers: pkLabels),
         // Nivel 15-17: Calles, vecindarios, colonias, parques y nombres
         if (showStreetLabels)
           TileLayer(
@@ -828,6 +841,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Marker _buildPkLabelMarker(PkGeoPoint pkPoint) {
+    return Marker(
+      point: pkPoint.point,
+      width: 96,
+      height: 20,
+      child: IgnorePointer(
+        child: Center(
+          child: Opacity(
+            opacity: 0.6,
+            child: Text(
+              pkPoint.pk,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                color: const Color(0xFFFFF59D),
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -1328,6 +1367,41 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   ),
                   label: Text(
                     _showPredioLabels ? 'Etiquetas ON' : 'Etiquetas OFF',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() => _showPkLabels = !_showPkLabels);
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(
+                      color: _showPkLabels
+                          ? const Color(0xFFFFF59D)
+                          : Colors.white.withOpacity(0.45),
+                    ),
+                    backgroundColor: _showPkLabels
+                        ? const Color(0x26FFF59D)
+                        : Colors.transparent,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: Icon(
+                    _showPkLabels
+                        ? Icons.place_rounded
+                        : Icons.place_outlined,
+                    size: 14,
+                  ),
+                  label: Text(
+                    _showPkLabels ? 'PKs ON' : 'PKs OFF',
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
