@@ -103,6 +103,24 @@ class _HeatBucket {
   Predio? sample;
 }
 
+class _NucleoAgrarioSummary {
+  const _NucleoAgrarioSummary({
+    required this.nombre,
+    required this.estado,
+    required this.municipios,
+    required this.totalPredios,
+    required this.liberados,
+    required this.noLiberados,
+  });
+
+  final String nombre;
+  final String estado;
+  final String municipios;
+  final int totalPredios;
+  final int liberados;
+  final int noLiberados;
+}
+
 class MapaConsultaScreen extends ConsumerStatefulWidget {
   const MapaConsultaScreen({super.key});
 
@@ -117,6 +135,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   Predio? _selectedPredio;
   GeoJsonPredioFeature? _selectedImportedFeature;
   bool _filterSoloEstaciones = false;
+  bool _mostrarNucleosAgrarios = true;
   bool _agruparMarcadores = true;
   bool _mostrarEtiquetas = false;
   bool _mostrarPks = false;
@@ -227,7 +246,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               top: 112,
               bottom: 0,
               width: 320,
-              child: _buildDetailPanelForImportedFeature(_selectedImportedFeature!),
+              child: _buildDetailPanelForImportedFeature(
+                _selectedImportedFeature!,
+                prediosAsync.valueOrNull ?? [],
+                importedGeoJsonAsync.valueOrNull ?? const [],
+              ),
             )
           else if (_selectedPredio != null)
             Positioned(
@@ -276,19 +299,19 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     _ensureImportedGeoJsonFocus(filteredImportedGeoJson);
     _ensureInitialFocus(predios, importedGeoJsonPredios);
     final polygons = <Polygon>[];
+    final nucleoPolygons = <Polygon>[];
     final envolventePolygons = <Polygon>[];
     final importedPolygons = <Polygon>[];
+    final nucleoPolylines = <Polyline>[];
     final envolventePolylines = <Polyline>[];
     final importedPolylines = <Polyline>[];
     final importedPkMarkers = <Marker>[];
-    final importedGroupMarkers = <Marker>[];
     final sedatuLabelMarkers = <Marker>[];
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
     final predioGroupMarkers = <Marker>[];
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
-    final importedBucketed = <String, _HeatBucket>{};
     // Nueva jerarquía de capas y etiquetas por zoom
     final showContinentLabels = false;
     final showCountryBorders = false;
@@ -361,14 +384,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    if (_agruparMarcadores && bucketSize > 0) {
-      final mergedBuckets =
-          _mergeOverlappingBuckets(bucketed.values.toList(), bucketSize);
-      for (final bucket in mergedBuckets) {
-        predioGroupMarkers.add(_buildHeatMarker(bucket));
-      }
-    }
-
     for (final feature in filteredImportedGeoJson) {
       final isEnvelopeFeature = _isEnvelopeFeature(feature);
       final rings = _extractPolygons(feature.geometry);
@@ -378,18 +393,29 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
       final isPkAsset = sourceAsset.endsWith('pks.geojson');
       final estatus = feature.estatus?.trim().toLowerCase();
+      final isNucleoAgrario = _isNucleoAgrarioFeature(feature);
         final fillColor = isEnvelopeFeature
           ? const Color(0xFF1976D2)
-          : (estatus == 'liberado'
-              ? const Color(0xFFCDDC39)
-              : const Color(0xFFD32F2F));
-      final borderColor = feature.esEstacion
-          ? const Color(0xFFFFD54F)
-          : fillColor.withOpacity(0.95);
-      final polygonOpacity = _currentZoom >= 12 ? 0.35 : 0.18;
+          : (isNucleoAgrario
+              ? const Color(0xFF4FC3F7)
+              : (estatus == 'liberado'
+                  ? const Color(0xFFCDDC39)
+                  : const Color(0xFFD32F2F)));
+        final borderColor = isEnvelopeFeature
+          ? const Color(0xFF1976D2)
+          : (isNucleoAgrario
+              ? const Color(0xFF4FC3F7)
+              : (feature.esEstacion
+                  ? const Color(0xFFFFD54F)
+                  : fillColor.withOpacity(0.95)));
+        final polygonOpacity = isEnvelopeFeature
+          ? (_currentZoom >= 12 ? 0.46 : 0.34)
+          : (_currentZoom >= 12 ? 0.35 : 0.18);
       final borderWidth = feature.esEstacion
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
-          : (_currentZoom >= 11 ? 3.0 : 1.6);
+          : (isEnvelopeFeature
+            ? (_currentZoom >= 11 ? 3.6 : 2.4)
+            : (_currentZoom >= 11 ? 3.0 : 1.6));
 
       for (final ring in rings) {
         if (ring.length < 3) continue;
@@ -400,8 +426,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         );
         if (drawRing.length < 3) continue;
         final targetPolygons = isEnvelopeFeature
-            ? envolventePolygons
-            : importedPolygons;
+          ? envolventePolygons
+          : (isNucleoAgrario ? nucleoPolygons : importedPolygons);
         targetPolygons.add(
           Polygon(
             points: drawRing,
@@ -422,8 +448,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         );
         if (drawLine.length < 2) continue;
         final targetPolylines = isEnvelopeFeature
-            ? envolventePolylines
-            : importedPolylines;
+          ? envolventePolylines
+          : (isNucleoAgrario ? nucleoPolylines : importedPolylines);
         targetPolylines.add(
           Polyline(
             points: drawLine,
@@ -450,26 +476,22 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         continue;
       }
 
-      if (shouldDrawImportedGroups() && markerPoint != null && !isEnvelopeFeature) {
-        final bucket = _putPointInCountBucket(importedBucketed, markerPoint, bucketSize);
+      if (shouldDrawImportedGroups() &&
+          markerPoint != null &&
+          !isEnvelopeFeature &&
+          !isNucleoAgrario) {
+        final bucket = _putPointInCountBucket(bucketed, markerPoint, bucketSize);
         final estatusLower = feature.estatus?.trim().toLowerCase() ?? '';
         if (estatusLower == 'liberado') bucket.liberados++;
         if (estatusLower.contains('no liberado')) bucket.noLiberados++;
       }
     }
 
-    if (shouldDrawImportedGroups()) {
-      final mergedImportedBuckets =
-          _mergeOverlappingBuckets(importedBucketed.values.toList(), bucketSize);
-      for (final bucket in mergedImportedBuckets) {
-        final clusterColor = bucket.liberados > bucket.noLiberados
-            ? const Color(0xFF388E3C)
-            : bucket.noLiberados > 0
-                ? const Color(0xFFD32F2F)
-                : const Color(0xFFF9A825);
-        importedGroupMarkers.add(
-          _buildCountMarker(bucket.center, bucket.count, clusterColor),
-        );
+    if (_agruparMarcadores && bucketSize > 0) {
+      final mergedBuckets =
+          _mergeOverlappingBuckets(bucketed.values.toList(), bucketSize);
+      for (final bucket in mergedBuckets) {
+        predioGroupMarkers.add(_buildHeatMarker(bucket));
       }
     }
 
@@ -582,11 +604,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ),
         // Nivel 0-3: Vista global, nombres de continentes/planeta (solo base, sin overlays)
         // Nivel 4-9: Países, estados, grandes cadenas montañosas y sus nombres
-        // Envolventes al fondo de todas las capas vectoriales.
-        if (envolventePolygons.isNotEmpty)
-          PolygonLayer(polygons: envolventePolygons),
-        if (envolventePolylines.isNotEmpty)
-          PolylineLayer(polylines: envolventePolylines),
+        // Envolventes se renderizan arriba para mantener visibilidad.
         if (showCountryBorders)
           TileLayer(
             urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
@@ -600,6 +618,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             maxZoom: 23,
           ),
         // Nivel 10-14: Ciudades, áreas metropolitanas, rutas, avenidas principales y nombres
+        // Los núcleos agrarios deben quedar por debajo del resto de capas vectoriales.
+        if (nucleoPolygons.isNotEmpty)
+          PolygonLayer(polygons: nucleoPolygons),
+        if (nucleoPolylines.isNotEmpty)
+          PolylineLayer(polylines: nucleoPolylines),
         if (showMunicipalBorders && municipalPolygons.isNotEmpty)
           PolygonLayer(polygons: municipalPolygons),
         if (showMunicipalBorders && municipalPolylines.isNotEmpty)
@@ -611,8 +634,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PolygonLayer(polygons: importedPolygons),
         if (importedPolylines.isNotEmpty)
           PolylineLayer(polylines: importedPolylines),
-        if (_agruparMarcadores && importedGroupMarkers.isNotEmpty)
-          MarkerLayer(markers: importedGroupMarkers),
+        if (envolventePolygons.isNotEmpty)
+          PolygonLayer(polygons: envolventePolygons),
+        if (envolventePolylines.isNotEmpty)
+          PolylineLayer(polylines: envolventePolylines),
         if (_agruparMarcadores && predioGroupMarkers.isNotEmpty)
           MarkerLayer(markers: predioGroupMarkers),
         if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
@@ -1064,7 +1089,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   ) {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion && !_isPkFeature(f))
+      .where((f) =>
+          !_isEnvelopeFeature(f) &&
+          !f.esEstacion &&
+          !_isPkFeature(f) &&
+          !_isNucleoAgrarioFeature(f))
       .toList();
     final liberacionFiltered = _applyLiberacionFilter(prediosOperative);
     final filteredPredios = _applyAllFilters(prediosOperative);
@@ -1229,6 +1258,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          _projectFilterChip(tipoProyectoCounts),
+                          const SizedBox(width: 8),
                           _quickToggleChip(
                             label: 'Agrupación',
                             isOn: _agruparMarcadores,
@@ -1243,6 +1274,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                             isOn: _mostrarEtiquetas,
                             icon: Icons.sell_outlined,
                             onTap: () => setState(() => _mostrarEtiquetas = !_mostrarEtiquetas),
+                          ),
+                          const SizedBox(width: 8),
+                          _quickToggleChip(
+                            label: 'Núcleos agrarios',
+                            isOn: _mostrarNucleosAgrarios,
+                            icon: Icons.landscape_rounded,
+                            onTap: () => setState(() {
+                              _mostrarNucleosAgrarios = !_mostrarNucleosAgrarios;
+                              _selectedPredio = null;
+                              _selectedImportedFeature = null;
+                            }),
                           ),
                           const SizedBox(width: 8),
                           OutlinedButton.icon(
@@ -1320,15 +1362,93 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
 
+  Widget _projectFilterChip(Map<String, int> tipoProyectoCounts) {
+    final labels = tipoProyectoCounts.keys
+        .where((k) => k.trim().isNotEmpty)
+        .toList()
+      ..sort();
+    final selected =
+      _selectedTipoProyectos.isEmpty ? 'Todos' : _selectedTipoProyectos.first;
+    final isActive = _selectedTipoProyectos.isNotEmpty;
+    final onColor = const Color(0xFFD4AF37);
+
+    return PopupMenuButton<String>(
+      tooltip: 'Filtrar por proyecto',
+      onSelected: (value) {
+        setState(() {
+          if (value == '__ALL__') {
+            _selectedTipoProyectos.clear();
+          } else {
+            _selectedTipoProyectos
+              ..clear()
+              ..add(value);
+          }
+          _selectedPredio = null;
+          _selectedImportedFeature = null;
+        });
+      },
+      itemBuilder: (context) {
+        return [
+          CheckedPopupMenuItem<String>(
+            value: '__ALL__',
+            checked: _selectedTipoProyectos.isEmpty,
+            child: const Text('Todos'),
+          ),
+          ...labels.map(
+            (label) => CheckedPopupMenuItem<String>(
+              value: label,
+              checked: _selectedTipoProyectos.contains(label),
+              child: Text(label),
+            ),
+          ),
+        ];
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? onColor.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isActive ? onColor : Colors.white.withOpacity(0.35),
+            width: isActive ? 1.6 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.layers_outlined, size: 16, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              'Proyecto: $selected',
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down, size: 18, color: Colors.white),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _openAdvancedFiltersPanel(
     List<Predio> predios,
     List<GeoJsonPredioFeature> importedFeatures,
   ) async {
     final prediosOperative = predios.where((p) => !_isEnvolventePredio(p)).toList();
     final importedOperative = importedFeatures
-      .where((f) => !_isEnvelopeFeature(f) && !f.esEstacion && !_isPkFeature(f))
+      .where((f) =>
+          !_isEnvelopeFeature(f) &&
+          !f.esEstacion &&
+          !_isPkFeature(f) &&
+          !_isNucleoAgrarioFeature(f))
       .toList();
-    final estacionesCount = importedFeatures.where((f) => f.esEstacion).length;
+    final estacionesCount = importedFeatures
+        .where((f) => f.esEstacion && !_isEnvelopeFeature(f) && !_isPkFeature(f))
+        .length;
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -1375,14 +1495,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             }
 
             void sanitizeSelections({
-              required Map<String, int> tipoProyectoCounts,
               required Map<String, int> estatusCounts,
               required Map<String, int> segmentoCounts,
               required Map<String, int> ejidoCounts,
               required Map<String, int> municipioCounts,
               required Map<String, int> clasificaCounts,
             }) {
-              _selectedTipoProyectos.removeWhere((v) => !tipoProyectoCounts.containsKey(v));
               _selectedEstatus.removeWhere((v) => !estatusCounts.containsKey(v));
               _segmentoQueries.removeWhere((v) => !segmentoCounts.containsKey(v));
               _selectedEjidos.removeWhere((v) => !ejidoCounts.containsKey(v));
@@ -1391,7 +1509,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             }
 
             List<Predio> prediosForCascade({
-              bool applyTipoProyecto = false,
               bool applyEstatus = false,
               bool applySegmento = false,
               bool applyEjido = false,
@@ -1401,7 +1518,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               if (_filterSoloEstaciones) return const [];
               var filtered = _applyLiberacionFilter(prediosOperative);
 
-              if (applyTipoProyecto && _selectedTipoProyectos.isNotEmpty) {
+              if (_selectedTipoProyectos.isNotEmpty) {
                 filtered = filtered.where((p) {
                   final label = _tipoProyectoLabel(p.proyecto);
                   return _selectedTipoProyectos.contains(label);
@@ -1453,7 +1570,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             }
 
             List<GeoJsonPredioFeature> importedForCascade({
-              bool applyTipoProyecto = false,
               bool applyEstatus = false,
               bool applySegmento = false,
               bool applyEjido = false,
@@ -1471,7 +1587,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 }).toList();
               }
 
-              if (applyTipoProyecto && _selectedTipoProyectos.isNotEmpty) {
+              if (_selectedTipoProyectos.isNotEmpty) {
                 filtered = filtered.where((feature) {
                   final label =
                       _tipoProyectoLabel(feature.properties['PROYECTO']?.toString());
@@ -1525,35 +1641,26 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               return filtered;
             }
 
-            final tipoProyectoCounts = buildDynamicCounts(
+            final estatusCounts = buildDynamicCounts(
               prediosForCascade(),
               importedForCascade(),
-              (p) => _tipoProyectoLabel(p.proyecto),
-              (props) => _tipoProyectoLabel(props['PROYECTO']?.toString()),
-              emptyLabel: 'Sin proyecto',
-            );
-            final estatusCounts = buildDynamicCounts(
-              prediosForCascade(applyTipoProyecto: true),
-              importedForCascade(applyTipoProyecto: true),
               (p) => _estatusFilterLabelFromPredio(p),
               (props) => _estatusFilterLabelFromProperties(props),
               emptyLabel: 'Sin estatus',
             );
             final segmentoCounts = buildDynamicCounts(
-              prediosForCascade(applyTipoProyecto: true, applyEstatus: true),
-              importedForCascade(applyTipoProyecto: true, applyEstatus: true),
+              prediosForCascade(applyEstatus: true),
+              importedForCascade(applyEstatus: true),
               (p) => _extractSegmentNumber(p.tramo),
               (props) => _extractSegmentNumber(_getSegmentoFromFeature(props)),
               emptyLabel: 'Sin segmento',
             );
             final ejidoCounts = buildDynamicCounts(
               prediosForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
               ),
               importedForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
               ),
@@ -1566,13 +1673,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             );
             final municipioCounts = buildDynamicCounts(
               prediosForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
                 applyEjido: true,
               ),
               importedForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
                 applyEjido: true,
@@ -1583,14 +1688,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             );
             final clasificaCounts = buildDynamicCounts(
               prediosForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
                 applyEjido: true,
                 applyMunicipio: true,
               ),
               importedForCascade(
-                applyTipoProyecto: true,
                 applyEstatus: true,
                 applySegmento: true,
                 applyEjido: true,
@@ -1602,7 +1705,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             );
 
             sanitizeSelections(
-              tipoProyectoCounts: tipoProyectoCounts,
               estatusCounts: estatusCounts,
               segmentoCounts: segmentoCounts,
               ejidoCounts: ejidoCounts,
@@ -1656,23 +1758,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  _countSectionMulti(
-                                    title: 'Tipo de proyecto',
-                                    counts: tipoProyectoCounts,
-                                    selectedLabels: _selectedTipoProyectos,
-                                    onChipTap: (tipo) {
-                                      updateFilters(() {
-                                        if (_selectedTipoProyectos.contains(tipo)) {
-                                          _selectedTipoProyectos.remove(tipo);
-                                        } else {
-                                          _selectedTipoProyectos.add(tipo);
-                                        }
-                                        _selectedPredio = null;
-                                        _selectedImportedFeature = null;
-                                      });
-                                    },
-                                  ),
-                                  const SizedBox(height: 12),
                                   _countSectionMulti(
                                     title: 'Estatus',
                                     counts: estatusCounts,
@@ -1793,6 +1878,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                                       ),
                                     ],
                                   ),
+                                  const SizedBox(height: 8),
                                 ],
                               ),
                             ),
@@ -1805,7 +1891,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                                   onPressed: () => updateFilters(() {
                                     _liberacionFilter = _LiberacionFilter.todos;
                                     _segmentoQueries.clear();
-                                    _selectedTipoProyectos.clear();
                                     _selectedEstatus.clear();
                                     _selectedEjidos.clear();
                                     _selectedClasificaciones.clear();
@@ -2168,7 +2253,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
 
-  Widget _buildDetailPanelForImportedFeature(GeoJsonPredioFeature feature) {
+  Widget _buildDetailPanelForImportedFeature(
+    GeoJsonPredioFeature feature,
+    List<Predio> predios,
+    List<GeoJsonPredioFeature> importedFeatures,
+  ) {
     final props = feature.properties;
     final clave = _getClaveFromFeature(props);
     final proyecto = _tipoProyectoLabel(
@@ -2176,6 +2265,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
     final isTapFeature = proyecto == 'TAP';
     final isEnvelopeFeature = _isEnvelopeFeature(feature);
+    final isNucleoAgrario = _isNucleoAgrarioFeature(feature);
+    final nucleoSummary = isNucleoAgrario
+        ? _buildNucleoAgrarioSummary(feature, predios, importedFeatures)
+        : null;
     final estatus = _getEstatusFromFeature(props);
     final isLiberado = _normalizedStatus(estatus) == 'liberado';
     final liberadoPorTap = _tapLiberadoPor(props, isLiberado: isLiberado);
@@ -2215,6 +2308,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final folioElectronico = _extractPropertyByKeyFragments(
       props,
       ['FOLIO', 'ELECTR'],
+    );
+    final tituloPropiedad = _extractPropertyByKeyFragments(
+      props,
+      ['TITULAR', 'REGISTRAL'],
+      fallbackFragments: ['TITULO', 'PROPIEDAD'],
+    );
+    final ultimoActoRegistrado = _extractPropertyByKeyFragments(
+      props,
+      ['ULTIMO', 'ACTO', 'REGISTRADO'],
     );
     final sujetoAgrario = _extractPropertyByKeyFragments(
       props,
@@ -2264,7 +2366,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Feature GeoJSON',
+                        isNucleoAgrario ? 'Núcleo agrario' : 'Feature GeoJSON',
                         style: GoogleFonts.inter(
                           color: Colors.white70,
                           fontSize: 12,
@@ -2273,7 +2375,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        feature.id,
+                        isNucleoAgrario &&
+                                nucleoSummary != null &&
+                                nucleoSummary.nombre.isNotEmpty
+                            ? nucleoSummary.nombre
+                            : feature.id,
                         style: GoogleFonts.inter(
                           color: Colors.white,
                           fontSize: 15,
@@ -2300,6 +2406,26 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (nucleoSummary != null) ...[
+                    _sectionTitle('Resumen del núcleo'),
+                    const SizedBox(height: 8),
+                    _infoRow('Nombre del núcleo', nucleoSummary.nombre),
+                    if (nucleoSummary.estado.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Estado', nucleoSummary.estado),
+                    ],
+                    if (nucleoSummary.municipios.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Municipios', nucleoSummary.municipios),
+                    ],
+                    const SizedBox(height: 4),
+                    _infoRow('Predios en el núcleo', '${nucleoSummary.totalPredios}'),
+                    const SizedBox(height: 4),
+                    _infoRow('Liberados', '${nucleoSummary.liberados}'),
+                    const SizedBox(height: 4),
+                    _infoRow('No liberados', '${nucleoSummary.noLiberados}'),
+                    const SizedBox(height: 16),
+                  ],
                   // Sección de información principal
                   _sectionTitle('Información'),
                   const SizedBox(height: 8),
@@ -2309,12 +2435,25 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   else
                     _infoRow('Clave/Clave SEDATU', ''),
                   if (isTapFeature) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Estatus', estatus.isEmpty ? 'No liberado' : estatus),
-                    const SizedBox(height: 4),
-                    _infoRow('Liberado por', liberadoPorTap),
-                    const SizedBox(height: 4),
-                    _infoRow('Envolvente', isEnvelopeFeature ? 'Sí' : 'No'),
+                    if (!isNucleoAgrario) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Estatus', estatus.isEmpty ? 'No liberado' : estatus),
+                      const SizedBox(height: 4),
+                      _infoRow('Liberado por', liberadoPorTap),
+                      const SizedBox(height: 4),
+                      _infoRow(
+                        'Título de propiedad',
+                        tituloPropiedad.isEmpty ? 'Sin dato' : tituloPropiedad,
+                      ),
+                    ],
+                    if (ultimoActoRegistrado.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Último acto registrado', ultimoActoRegistrado),
+                    ],
+                    if (folioElectronico.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Folio electrónico', folioElectronico),
+                    ],
                     const SizedBox(height: 16),
                   ] else ...[
                     if (propietario.isNotEmpty) ...[
@@ -2349,11 +2488,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                       const SizedBox(height: 4),
                       _infoRow('Frente', frente),
                     ],
-                    if (municipio.isNotEmpty) ...[
+                    if (municipio.isNotEmpty && nucleoSummary == null) ...[
                       const SizedBox(height: 4),
                       _infoRow('Municipio', municipio),
                     ],
-                    if (estado.isNotEmpty) ...[
+                    if (estado.isNotEmpty && nucleoSummary == null) ...[
                       const SizedBox(height: 4),
                       _infoRow('Estado', estado),
                     ],
@@ -2416,13 +2555,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     _buildGestionChecklistForFeature(props),
                     const SizedBox(height: 16),
                     // Banderas de clasificación
-                    if (feature.esEstacion || isEnvelopeFeature) ...[
+                    if (feature.esEstacion || isEnvelopeFeature || isNucleoAgrario) ...[
                       _sectionTitle('Clasificación'),
                       const SizedBox(height: 8),
                       if (feature.esEstacion)
                         _classificationTag('Estación', Colors.amber),
                       if (isEnvelopeFeature)
                         _classificationTag('Envolvente', Colors.blue),
+                      if (isNucleoAgrario)
+                        _classificationTag('Núcleo agrario', const Color(0xFF4FC3F7)),
                       const SizedBox(height: 16),
                     ],
                   ],
@@ -2438,6 +2579,99 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           ),
         ],
       ),
+    );
+  }
+
+  _NucleoAgrarioSummary _buildNucleoAgrarioSummary(
+    GeoJsonPredioFeature feature,
+    List<Predio> predios,
+    List<GeoJsonPredioFeature> importedFeatures,
+  ) {
+    final props = feature.properties;
+    final nombre = _getNucleoAgrarioNombre(props);
+    final project = _tipoProyectoLabel(
+      _extractPropertyByKeyFragments(props, ['PROYECTO']),
+    );
+    final rings = _extractPolygons(feature.geometry)
+        .where((ring) => ring.length >= 3)
+        .toList();
+    final municipios = <String>{};
+    final estados = <String>{};
+    var totalPredios = 0;
+    var liberados = 0;
+    var noLiberados = 0;
+
+    void absorbRegion(String municipio, String estado) {
+      final municipioValue = municipio.trim();
+      final estadoValue = estado.trim();
+      if (municipioValue.isNotEmpty) municipios.add(municipioValue);
+      if (estadoValue.isNotEmpty) estados.add(estadoValue);
+    }
+
+    bool containsPoint(LatLng point) {
+      for (final ring in rings) {
+        if (_isPointInPolygon(point, ring)) return true;
+      }
+      return false;
+    }
+
+    if (rings.isNotEmpty) {
+      for (final predio in predios) {
+        final predioProject = _tipoProyectoLabel(predio.proyecto);
+        if (project.isNotEmpty && predioProject.isNotEmpty && predioProject != project) {
+          continue;
+        }
+        final point = _markerPointForPredio(predio);
+        if (point == null || !containsPoint(point)) continue;
+        totalPredios++;
+        if (_isLiberado(predio)) liberados++;
+        if (_isNoLiberado(predio)) noLiberados++;
+        absorbRegion(predio.municipio ?? '', predio.estado ?? '');
+      }
+
+      for (final importedFeature in importedFeatures) {
+        if (identical(importedFeature, feature) || importedFeature.id == feature.id) {
+          continue;
+        }
+        if (_isEnvelopeFeature(importedFeature) ||
+            _isPkFeature(importedFeature) ||
+            importedFeature.esEstacion ||
+            _isNucleoAgrarioFeature(importedFeature)) {
+          continue;
+        }
+
+        final importedProject = _tipoProyectoLabel(
+          _extractPropertyByKeyFragments(importedFeature.properties, ['PROYECTO']),
+        );
+        if (project.isNotEmpty && importedProject.isNotEmpty && importedProject != project) {
+          continue;
+        }
+
+        final point = _markerPointForImportedFeature(importedFeature);
+        if (point == null || !containsPoint(point)) continue;
+
+        totalPredios++;
+        if (_isImportedLiberado(importedFeature)) liberados++;
+        if (_isImportedNoLiberado(importedFeature)) noLiberados++;
+        absorbRegion(
+          _getMunicipioFromFeature(importedFeature.properties),
+          _getEstadoFromFeature(importedFeature.properties),
+        );
+      }
+    }
+
+    absorbRegion(
+      _getMunicipioFromFeature(props),
+      _getEstadoFromFeature(props),
+    );
+
+    return _NucleoAgrarioSummary(
+      nombre: nombre,
+      estado: estados.join(', '),
+      municipios: municipios.join(', '),
+      totalPredios: totalPredios,
+      liberados: liberados,
+      noLiberados: noLiberados,
     );
   }
 
@@ -2645,18 +2879,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     Map<String, dynamic> properties, {
     required bool isLiberado,
   }) {
-    if (!isLiberado) return 'No aplica';
     if (_isCOPFirmado(properties)) return 'COP';
 
-    // DOT no siempre existe como campo explícito en los insumos;
-    // cuando hay evidencia de convenio/acto de liberación lo tratamos como DOT.
-    final dotValue = _extractPropertyByKeyFragments(properties, ['DOT']);
-    if (_isValueTrue(dotValue) || _hasMeaningfulValue(dotValue)) return 'DOT';
+    if (!isLiberado) return 'No aplica';
 
-    final convenio = _extractPropertyByKeyFragments(properties, ['CONVENIO']);
-    if (_isValueTrue(convenio) || _hasMeaningfulValue(convenio)) return 'DOT';
-
-    return 'Sin definir';
+    // Para predios TAP liberados, la salida debe ser solo COP o DOT.
+    // Si no clasifica como COP, se etiqueta como DOT.
+    return 'DOT';
   }
 
   /// Helper para determinar si un valor es "truthy"
@@ -3087,6 +3316,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   String _tipoProyectoLabel(String? proyecto) {
     final value = proyecto?.trim().toUpperCase();
     if (value == null || value.isEmpty) return 'Sin proyecto';
+    if (value == 'TSN') return 'TSNL';
     return value;
   }
 
@@ -3189,8 +3419,21 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }).toList();
     }
 
+    if (!_mostrarNucleosAgrarios) {
+      filtered =
+          filtered.where((feature) => !_isNucleoAgrarioFeature(feature)).toList();
+    }
+
     // Retornar: contenido filtrado + envolventes siempre visibles
     return [...filtered, ...envolventes];
+  }
+
+  bool _isNucleoAgrarioFeature(GeoJsonPredioFeature feature) {
+    final marker = (feature.properties['ES_NUCLEO_AGRARIO'] ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
+    return marker == 'SI' || marker == 'TRUE' || marker == '1';
   }
 
   bool _isEnvelopeFeature(GeoJsonPredioFeature feature) {
@@ -3217,6 +3460,39 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final sourceAsset =
         (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
     return sourceAsset.endsWith('pks.geojson') || sourceAsset.contains('/pks.geojson');
+  }
+
+  String _getNucleoAgrarioNombre(Map<String, dynamic> properties) {
+    final nombre = _extractPropertyByKeyFragments(
+      properties,
+      ['NOM', 'SEDATU'],
+      fallbackFragments: ['SUJETO', 'AGRARIO'],
+    );
+    if (nombre.isNotEmpty) return nombre;
+
+    final ejido = _extractPropertyByKeyFragments(properties, ['EJIDO']);
+    if (ejido.isNotEmpty) return ejido;
+
+    final clave = _getClaveFromFeature(properties);
+    if (clave.isNotEmpty) return clave;
+    return 'Sin nombre';
+  }
+
+  LatLng? _markerPointForImportedFeature(GeoJsonPredioFeature feature) {
+    final directPoint = _extractRepresentativePoint(feature.geometry);
+    if (directPoint != null) return directPoint;
+
+    final polygons = _extractPolygons(feature.geometry);
+    if (polygons.isNotEmpty && polygons.first.isNotEmpty) {
+      return _centroid(polygons.first);
+    }
+
+    final polylines = _extractPolylines(feature.geometry);
+    if (polylines.isNotEmpty && polylines.first.isNotEmpty) {
+      return _centroid(polylines.first);
+    }
+
+    return null;
   }
 
   String _getEjidoFromFeature(Map<String, dynamic> properties) {

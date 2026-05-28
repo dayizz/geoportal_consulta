@@ -528,21 +528,41 @@ final importedGeoJsonPrediosProvider =
           final sourceAsset = (feature['__source_asset'] ?? '').toString().toLowerCase();
           final isTapEnvelopeAsset =
               sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02.geojson');
+          final isTsnlEnvelopeAsset =
+              sourceAsset.contains('envolvente_completa.geojson');
+            final isTapAsset =
+              sourceAsset.contains('/tap_') ||
+              sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02');
+            final isTsnlAsset =
+              sourceAsset.contains('/tsn_') || sourceAsset.contains('tsnl');
+          final hasEnvolventeSource =
+              sourceAsset.contains('envolvente') || isTapEnvelopeAsset || isTsnlEnvelopeAsset;
+          final hasEnvolventeProp = props.values.any(
+            (value) => value.toString().toLowerCase().contains('envolvente'),
+          );
+          final hasEstacionProp = sourceAsset.contains('estaciones_y_edificios');
+          final rawProject =
+              (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
+            final inferredEnvelopeProject =
+              isTapEnvelopeAsset ? 'TAP' : (isTsnlEnvelopeAsset ? 'TSNL' : '');
+            final inferredProject = inferredEnvelopeProject.isNotEmpty
+              ? inferredEnvelopeProject
+              : (isTapAsset ? 'TAP' : (isTsnlAsset ? 'TSNL' : ''));
+          final finalProject =
+              rawProject.isNotEmpty
+                ? rawProject
+                : ((hasEnvolventeSource || hasEnvolventeProp)
+                  ? inferredEnvelopeProject
+                  : inferredProject);
           final enrichedProps = <String, dynamic>{
             ...props,
-            if (isTapEnvelopeAsset) 'PROYECTO': 'TAP',
-            if (isTapEnvelopeAsset) 'TIPO_CAPA': 'ENVOLVENTE',
+            if (finalProject.isNotEmpty) 'PROYECTO': finalProject,
+            if (hasEnvolventeSource || hasEnvolventeProp) 'TIPO_CAPA': 'ENVOLVENTE',
           };
           final propsWithMeta = <String, dynamic>{
             ...enrichedProps,
             '__source_asset': sourceAsset,
           };
-          final hasEnvolventeSource =
-              sourceAsset.contains('envolvente') || isTapEnvelopeAsset;
-          final hasEnvolventeProp = props.values.any(
-            (value) => value.toString().toLowerCase().contains('envolvente'),
-          );
-          final hasEstacionProp = sourceAsset.contains('estaciones_y_edificios');
           return GeoJsonPredioFeature(
             id: _extractDisplayId(enrichedProps),
             estatus: (enrichedProps['ESTATUS'] ?? enrichedProps['estatus'])?.toString(),
