@@ -2174,7 +2174,11 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final proyecto = _tipoProyectoLabel(
       _extractPropertyByKeyFragments(props, ['PROYECTO']),
     );
+    final isTapFeature = proyecto == 'TAP';
+    final isEnvelopeFeature = _isEnvelopeFeature(feature);
     final estatus = _getEstatusFromFeature(props);
+    final isLiberado = _normalizedStatus(estatus) == 'liberado';
+    final liberadoPorTap = _tapLiberadoPor(props, isLiberado: isLiberado);
     final segmento = _getSegmentoFromFeature(props);
     final kmInicio = _getKmInicioFromFeature(props);
     final kmFin = _getKmFinFromFeature(props);
@@ -2304,113 +2308,123 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                     _infoRow('Clave/Clave SEDATU', clave)
                   else
                     _infoRow('Clave/Clave SEDATU', ''),
-                  if (propietario.isNotEmpty) ...[
+                  if (isTapFeature) ...[
                     const SizedBox(height: 4),
-                    _infoRow('Propietario', propietario),
-                  ],
-                  if (estatus.isNotEmpty) ...[
+                    _infoRow('Estatus', estatus.isEmpty ? 'No liberado' : estatus),
                     const SizedBox(height: 4),
-                    _infoRow('Estatus', estatus),
-                  ],
-                  if (kmInicio.isNotEmpty) ...[
+                    _infoRow('Liberado por', liberadoPorTap),
                     const SizedBox(height: 4),
-                    _infoRow('KM Inicio', kmInicio),
-                  ],
-                  if (kmFin.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('KM Fin', kmFin),
-                  ],
-                  if (kmLineales.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('KM Lineales', kmLineales),
-                  ],
-                  if (segmento.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Segmento', segmento),
-                  ],
-                  if (tipoPropiedad.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Tipo de Propiedad', tipoPropiedad),
-                  ],
-                  if (frente.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Frente', frente),
-                  ],
-                  if (municipio.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Municipio', municipio),
-                  ],
-                  if (estado.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Estado', estado),
-                  ],
-                  if (anuencia.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Anuencia', anuencia),
-                  ],
-                  if (estructura.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Estructura', estructura),
-                  ],
-                  if (m2.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('M2', m2),
-                  ],
-                  if (nuevo.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Nuevo', nuevo),
-                  ],
-                  if (observaciones.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Observaciones', observaciones),
-                  ],
-                  if (folioElectronico.isNotEmpty ||
-                      sujetoAgrario.isNotEmpty ||
-                      poseedor.isNotEmpty ||
-                      valorCatastral.isNotEmpty ||
-                      valorComercial.isNotEmpty ||
-                      negociado.isNotEmpty ||
-                      acercamiento.isNotEmpty ||
-                      convenioFirmado.isNotEmpty ||
-                      montoTotal.isNotEmpty ||
-                      pago.isNotEmpty) ...[
+                    _infoRow('Envolvente', isEnvelopeFeature ? 'Sí' : 'No'),
                     const SizedBox(height: 16),
-                    _sectionTitle('Datos complementarios TAP'),
-                    const SizedBox(height: 8),
-                    if (folioElectronico.isNotEmpty)
-                      _infoRow('Folio electrónico', folioElectronico),
-                    if (sujetoAgrario.isNotEmpty)
-                      _infoRow('Sujeto agrario', sujetoAgrario),
-                    if (poseedor.isNotEmpty) _infoRow('Poseedor', poseedor),
-                    if (valorCatastral.isNotEmpty)
-                      _infoRow('Valor catastral', valorCatastral),
-                    if (valorComercial.isNotEmpty)
-                      _infoRow('Valor comercial', valorComercial),
-                    if (negociado.isNotEmpty)
-                      _infoRow('Negociado', negociado),
-                    if (acercamiento.isNotEmpty)
-                      _infoRow('Acercamiento', acercamiento),
-                    if (convenioFirmado.isNotEmpty)
-                      _infoRow('Convenio firmado', convenioFirmado),
-                    if (montoTotal.isNotEmpty)
-                      _infoRow('Monto total', montoTotal),
-                    if (pago.isNotEmpty) _infoRow('Pago', pago),
-                  ],
-                  const SizedBox(height: 16),
-                  // Sección de estado de gestión (checklist)
-                  _sectionTitle('Estado de Gestión'),
-                  const SizedBox(height: 8),
-                  _buildGestionChecklistForFeature(props),
-                  const SizedBox(height: 16),
-                  // Banderas de clasificación
-                  if (feature.esEstacion || feature.esEnvolvente) ...[
-                    _sectionTitle('Clasificación'),
-                    const SizedBox(height: 8),
-                    if (feature.esEstacion)
-                      _classificationTag('Estación', Colors.amber),
-                    if (feature.esEnvolvente)
-                      _classificationTag('Envolvente', Colors.blue),
+                  ] else ...[
+                    if (propietario.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Propietario', propietario),
+                    ],
+                    if (estatus.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Estatus', estatus),
+                    ],
+                    if (kmInicio.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('KM Inicio', kmInicio),
+                    ],
+                    if (kmFin.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('KM Fin', kmFin),
+                    ],
+                    if (kmLineales.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('KM Lineales', kmLineales),
+                    ],
+                    if (segmento.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Segmento', segmento),
+                    ],
+                    if (tipoPropiedad.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Tipo de Propiedad', tipoPropiedad),
+                    ],
+                    if (frente.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Frente', frente),
+                    ],
+                    if (municipio.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Municipio', municipio),
+                    ],
+                    if (estado.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Estado', estado),
+                    ],
+                    if (anuencia.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Anuencia', anuencia),
+                    ],
+                    if (estructura.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Estructura', estructura),
+                    ],
+                    if (m2.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('M2', m2),
+                    ],
+                    if (nuevo.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Nuevo', nuevo),
+                    ],
+                    if (observaciones.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _infoRow('Observaciones', observaciones),
+                    ],
+                    if (folioElectronico.isNotEmpty ||
+                        sujetoAgrario.isNotEmpty ||
+                        poseedor.isNotEmpty ||
+                        valorCatastral.isNotEmpty ||
+                        valorComercial.isNotEmpty ||
+                        negociado.isNotEmpty ||
+                        acercamiento.isNotEmpty ||
+                        convenioFirmado.isNotEmpty ||
+                        montoTotal.isNotEmpty ||
+                        pago.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _sectionTitle('Datos complementarios TAP'),
+                      const SizedBox(height: 8),
+                      if (folioElectronico.isNotEmpty)
+                        _infoRow('Folio electrónico', folioElectronico),
+                      if (sujetoAgrario.isNotEmpty)
+                        _infoRow('Sujeto agrario', sujetoAgrario),
+                      if (poseedor.isNotEmpty) _infoRow('Poseedor', poseedor),
+                      if (valorCatastral.isNotEmpty)
+                        _infoRow('Valor catastral', valorCatastral),
+                      if (valorComercial.isNotEmpty)
+                        _infoRow('Valor comercial', valorComercial),
+                      if (negociado.isNotEmpty)
+                        _infoRow('Negociado', negociado),
+                      if (acercamiento.isNotEmpty)
+                        _infoRow('Acercamiento', acercamiento),
+                      if (convenioFirmado.isNotEmpty)
+                        _infoRow('Convenio firmado', convenioFirmado),
+                      if (montoTotal.isNotEmpty)
+                        _infoRow('Monto total', montoTotal),
+                      if (pago.isNotEmpty) _infoRow('Pago', pago),
+                    ],
                     const SizedBox(height: 16),
+                    // Sección de estado de gestión (checklist)
+                    _sectionTitle('Estado de Gestión'),
+                    const SizedBox(height: 8),
+                    _buildGestionChecklistForFeature(props),
+                    const SizedBox(height: 16),
+                    // Banderas de clasificación
+                    if (feature.esEstacion || isEnvelopeFeature) ...[
+                      _sectionTitle('Clasificación'),
+                      const SizedBox(height: 8),
+                      if (feature.esEstacion)
+                        _classificationTag('Estación', Colors.amber),
+                      if (isEnvelopeFeature)
+                        _classificationTag('Envolvente', Colors.blue),
+                      const SizedBox(height: 16),
+                    ],
                   ],
                   // Botón para cerrar
                   FilledButton.tonal(
@@ -2625,6 +2639,24 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     if (_hasMeaningfulValue(fechaCop)) return true;
 
     return false;
+  }
+
+  String _tapLiberadoPor(
+    Map<String, dynamic> properties, {
+    required bool isLiberado,
+  }) {
+    if (!isLiberado) return 'No aplica';
+    if (_isCOPFirmado(properties)) return 'COP';
+
+    // DOT no siempre existe como campo explícito en los insumos;
+    // cuando hay evidencia de convenio/acto de liberación lo tratamos como DOT.
+    final dotValue = _extractPropertyByKeyFragments(properties, ['DOT']);
+    if (_isValueTrue(dotValue) || _hasMeaningfulValue(dotValue)) return 'DOT';
+
+    final convenio = _extractPropertyByKeyFragments(properties, ['CONVENIO']);
+    if (_isValueTrue(convenio) || _hasMeaningfulValue(convenio)) return 'DOT';
+
+    return 'Sin definir';
   }
 
   /// Helper para determinar si un valor es "truthy"
