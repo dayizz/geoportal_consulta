@@ -386,6 +386,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     for (final feature in filteredImportedGeoJson) {
       final isEnvelopeFeature = _isEnvelopeFeature(feature);
+      final isTmqEnvelopeFeature = _isTmqEnvelopeFeature(feature);
       final rings = _extractPolygons(feature.geometry);
       final lines = _extractPolylines(feature.geometry);
       LatLng? markerPoint = _extractRepresentativePoint(feature.geometry);
@@ -394,26 +395,26 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final isPkAsset = sourceAsset.endsWith('pks.geojson');
       final estatus = feature.estatus?.trim().toLowerCase();
       final isNucleoAgrario = _isNucleoAgrarioFeature(feature);
-        final fillColor = isEnvelopeFeature
+        final fillColor = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? const Color(0xFF1976D2)
           : (isNucleoAgrario
               ? const Color(0xFF4FC3F7)
               : (estatus == 'liberado'
                   ? const Color(0xFFCDDC39)
                   : const Color(0xFFD32F2F)));
-        final borderColor = isEnvelopeFeature
+        final borderColor = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? const Color(0xFF1976D2)
           : (isNucleoAgrario
               ? const Color(0xFF4FC3F7)
               : (feature.esEstacion
                   ? const Color(0xFFFFD54F)
                   : fillColor.withOpacity(0.95)));
-        final polygonOpacity = isEnvelopeFeature
+        final polygonOpacity = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? (_currentZoom >= 12 ? 0.46 : 0.34)
           : (_currentZoom >= 12 ? 0.35 : 0.18);
       final borderWidth = feature.esEstacion
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
-          : (isEnvelopeFeature
+          : ((isEnvelopeFeature || isTmqEnvelopeFeature)
             ? (_currentZoom >= 11 ? 3.6 : 2.4)
             : (_currentZoom >= 11 ? 3.0 : 1.6));
 
@@ -460,7 +461,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         markerPoint ??= _centroid(line);
       }
 
-      if (_mostrarEtiquetas && markerPoint != null && !isEnvelopeFeature) {
+      if (_mostrarEtiquetas && markerPoint != null && !isEnvelopeFeature && !isTmqEnvelopeFeature) {
         final sedatuClave = _getClaveFromFeature(feature.properties);
         if (sedatuClave.isNotEmpty) {
           sedatuLabelMarkers.add(
@@ -1364,11 +1365,15 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   Widget _projectFilterChip(Map<String, int> tipoProyectoCounts) {
     final labels = tipoProyectoCounts.keys
-        .where((k) => k.trim().isNotEmpty)
+        .where((k) => k.trim().isNotEmpty && k.trim() != 'Sin proyecto')
         .toList()
       ..sort();
-    final selected =
-      _selectedTipoProyectos.isEmpty ? 'Todos' : _selectedTipoProyectos.first;
+    final selected = _selectedTipoProyectos.isEmpty
+      ? 'Todos'
+      : (_selectedTipoProyectos.firstWhere(
+          (label) => labels.contains(label),
+          orElse: () => 'Todos',
+        ));
     final isActive = _selectedTipoProyectos.isNotEmpty;
     final onColor = const Color(0xFFD4AF37);
 
@@ -3441,6 +3446,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     final sourceAsset =
         (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+    if (sourceAsset.contains('tmq_envolvente2026.geojson')) return false;
     if (sourceAsset.contains('envolvente')) return true;
     if (sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02')) {
       return true;
@@ -3454,6 +3460,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
     final clave = _getClaveFromFeature(feature.properties);
     return _containsEnvolventeKeyword(clave);
+  }
+
+  bool _isTmqEnvelopeFeature(GeoJsonPredioFeature feature) {
+    final sourceAsset =
+        (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+    return sourceAsset.contains('tmq_envolvente2026.geojson');
   }
 
   bool _isPkFeature(GeoJsonPredioFeature feature) {

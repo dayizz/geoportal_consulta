@@ -503,6 +503,7 @@ final importedGeoJsonPrediosProvider =
     final importAssets = <String>[
       'assets/data/TSN_SEG_16_17.geojson',
       'assets/data/ENVOLVENTE_COMPLETA.geojson',
+      'assets/data/TMQ_envolvente2026.geojson',
       'assets/data/TSN_SEG_13.geojson',
       'assets/data/TSN_SEG_18.geojson',
       'assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson',
@@ -530,13 +531,19 @@ final importedGeoJsonPrediosProvider =
               sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02.geojson');
           final isTsnlEnvelopeAsset =
               sourceAsset.contains('envolvente_completa.geojson');
+          final isTmqEnvelopeAsset =
+              sourceAsset.contains('tmq_envolvente2026.geojson');
             final isTapAsset =
               sourceAsset.contains('/tap_') ||
               sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02');
             final isTsnlAsset =
               sourceAsset.contains('/tsn_') || sourceAsset.contains('tsnl');
-          final hasEnvolventeSource =
-              sourceAsset.contains('envolvente') || isTapEnvelopeAsset || isTsnlEnvelopeAsset;
+            final isTmqAsset =
+              sourceAsset.contains('/tmq_') || sourceAsset.contains('tmq_');
+            final hasEnvolventeSource =
+              sourceAsset.contains('envolvente') ||
+              isTapEnvelopeAsset ||
+              isTsnlEnvelopeAsset;
           final hasEnvolventeProp = props.values.any(
             (value) => value.toString().toLowerCase().contains('envolvente'),
           );
@@ -544,10 +551,16 @@ final importedGeoJsonPrediosProvider =
           final rawProject =
               (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
             final inferredEnvelopeProject =
-              isTapEnvelopeAsset ? 'TAP' : (isTsnlEnvelopeAsset ? 'TSNL' : '');
+              isTapEnvelopeAsset
+                  ? 'TAP'
+                  : (isTsnlEnvelopeAsset
+                      ? 'TSNL'
+                      : (isTmqEnvelopeAsset ? 'TMQ' : ''));
             final inferredProject = inferredEnvelopeProject.isNotEmpty
               ? inferredEnvelopeProject
-              : (isTapAsset ? 'TAP' : (isTsnlAsset ? 'TSNL' : ''));
+              : (isTapAsset
+                  ? 'TAP'
+                  : (isTsnlAsset ? 'TSNL' : (isTmqAsset ? 'TMQ' : '')));
           final finalProject =
               rawProject.isNotEmpty
                 ? rawProject
@@ -557,7 +570,7 @@ final importedGeoJsonPrediosProvider =
           final enrichedProps = <String, dynamic>{
             ...props,
             if (finalProject.isNotEmpty) 'PROYECTO': finalProject,
-            if (hasEnvolventeSource || hasEnvolventeProp) 'TIPO_CAPA': 'ENVOLVENTE',
+            if (hasEnvolventeSource || hasEnvolventeProp || isTmqEnvelopeAsset) 'TIPO_CAPA': 'ENVOLVENTE',
           };
           final propsWithMeta = <String, dynamic>{
             ...enrichedProps,
