@@ -1,4 +1,5 @@
 
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -310,6 +311,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
     final predioGroupMarkers = <Marker>[];
+    final drawnPolygonKeys = <String>{};
+    final drawnPolylineKeys = <String>{};
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
     // Nueva jerarquía de capas y etiquetas por zoom
@@ -352,6 +355,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                 isPolygon: true,
               );
               if (drawCoords.length < 3) continue;
+              final polygonKey = 'predio:${_lineKey(drawCoords)}';
+              if (!drawnPolygonKeys.add(polygonKey)) continue;
               polygons.add(Polygon(
                 points: drawCoords,
                 color: color.withOpacity(0.35),
@@ -426,6 +431,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: true,
         );
         if (drawRing.length < 3) continue;
+        final ringKey =
+            '${isEnvelopeFeature ? 'env' : (isNucleoAgrario ? 'nuc' : 'imp')}:${_lineKey(drawRing)}';
+        if (!drawnPolygonKeys.add(ringKey)) continue;
         final targetPolygons = isEnvelopeFeature
           ? envolventePolygons
           : (isNucleoAgrario ? nucleoPolygons : importedPolygons);
@@ -448,6 +456,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           isPolygon: false,
         );
         if (drawLine.length < 2) continue;
+        final lineKey =
+            '${isEnvelopeFeature ? 'env' : (isNucleoAgrario ? 'nuc' : 'imp')}:${_lineKey(drawLine)}';
+        if (!drawnPolylineKeys.add(lineKey)) continue;
         final targetPolylines = isEnvelopeFeature
           ? envolventePolylines
           : (isNucleoAgrario ? nucleoPolylines : importedPolylines);
@@ -3429,8 +3440,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           filtered.where((feature) => !_isNucleoAgrarioFeature(feature)).toList();
     }
 
-    // Retornar: contenido filtrado + envolventes siempre visibles
-    return [...filtered, ...envolventes];
+    // Retornar: contenido filtrado + envolventes siempre visibles, sin duplicados geométricos.
+    return _dedupeImportedFeaturesByGeometry([...filtered, ...envolventes]);
+  }
+
+  List<GeoJsonPredioFeature> _dedupeImportedFeaturesByGeometry(
+    List<GeoJsonPredioFeature> features,
+  ) {
+    final seen = <String>{};
+    final deduped = <GeoJsonPredioFeature>[];
+    for (final feature in features) {
+      final key = _featureGeometryKey(feature);
+      if (seen.add(key)) {
+        deduped.add(feature);
+      }
+    }
+    return deduped;
+  }
+
+  String _featureGeometryKey(GeoJsonPredioFeature feature) {
+    final sourceAsset =
+        (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
+    final geometry = feature.geometry;
+    final type = (geometry['type'] ?? '').toString();
+    final coords = geometry['coordinates'];
+    final coordsEncoded = coords == null ? '' : jsonEncode(coords);
+    return '$sourceAsset|$type|$coordsEncoded';
   }
 
   bool _isNucleoAgrarioFeature(GeoJsonPredioFeature feature) {
@@ -3472,6 +3507,18 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final sourceAsset =
         (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
     return sourceAsset.endsWith('pks.geojson') || sourceAsset.contains('/pks.geojson');
+  }
+
+  String _lineKey(List<LatLng> line) {
+    final b = StringBuffer();
+    for (final p in line) {
+      b
+        ..write(p.latitude.toStringAsFixed(6))
+        ..write(',')
+        ..write(p.longitude.toStringAsFixed(6))
+        ..write(';');
+    }
+    return b.toString();
   }
 
   String _getNucleoAgrarioNombre(Map<String, dynamic> properties) {
