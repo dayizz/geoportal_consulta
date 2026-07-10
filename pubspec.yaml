@@ -37,14 +37,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/data/municipios.geojson
-    - assets/data/TSN_SEG_16_17.geojson
-    - assets/data/ENVOLVENTE_COMPLETA.geojson
-    - assets/data/TMQ_envolvente2026.geojson
-    - assets/data/TSN_SEG_13.geojson
-    - assets/data/TSN_SEG_18.geojson
-    - assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson
-    - assets/data/AP-T00-SDEF-01-V00-PLA-PR_PRG-36779_25-A02.geojson
-    - assets/data/TAP_25_05_2026.geojson
-    - assets/data/TAP_LIMITES_MUNICIPALES_ESTATALES.geojson
-    - assets/data/pks.geojson
+    - assets/data/manifest.json
