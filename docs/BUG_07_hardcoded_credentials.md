@@ -4,17 +4,18 @@
 **Archivo**: `geoportal_consulta/lib/features/auth/auth_provider.dart` líneas 3-4  
 **Tipo**: Information disclosure / Secrets exposure  
 **Impacto**: Credenciales públicamente accesibles en repositorio GitHub  
+**Status**: ✅ CORREGIDO — migrado a variables de entorno con validación defensiva
 
 ---
 
 ## Problema
 
-Las credenciales de acceso están hardcodeadas en el código fuente de la aplicación pública:
+Las credenciales de acceso estaban hardcodeadas en el código fuente de la aplicación pública:
 
 ```dart
 // geoportal_consulta/lib/features/auth/auth_provider.dart
-const accesoUsuario = 'ATTRAPI';
-const accesoContrasena = 'Trenes2026!';
+const accesoUsuario = String.fromEnvironment('GEOPORTAL_CONSULTA_USER');
+const accesoContrasena = String.fromEnvironment('GEOPORTAL_CONSULTA_PASSWORD');
 ```
 
 ---

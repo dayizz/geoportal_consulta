@@ -32,6 +32,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _loading = true;
     });
 
+    if (!authConfigCompleta) {
+      setState(() {
+        _error =
+            'Configuracion de autenticacion incompleta. Define GEOPORTAL_CONSULTA_USER y GEOPORTAL_CONSULTA_PASSWORD.';
+        _loading = false;
+      });
+      return;
+    }
+
     await Future.delayed(const Duration(milliseconds: 300));
 
     final usuario = _usuarioCtrl.text.trim();
