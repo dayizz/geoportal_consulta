@@ -1,15 +1,14 @@
 import 'dart:convert';
 
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../../core/supabase/supabase_config.dart';
 import 'predio_model.dart';
 
-const _backendBaseUrl = 'http://127.0.0.1:8000';
+const _backendBaseUrl = String.fromEnvironment(
+  'GEOPORTAL_GESTION_API_URL',
+  defaultValue: 'http://127.0.0.1:8000',
+);
 
 class MunicipioLimite {
   final String id;
@@ -204,6 +203,8 @@ LatLng _centroid(List<LatLng> points) {
 }
 
 bool _pointInPolygon(LatLng point, List<LatLng> ring) {
+  if (ring.isEmpty) return false;
+  
   var inside = false;
   for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     final xi = ring[i].longitude;
@@ -211,14 +212,25 @@ bool _pointInPolygon(LatLng point, List<LatLng> ring) {
     final xj = ring[j].longitude;
     final yj = ring[j].latitude;
 
+    final p_lat = point.latitude;
+    final p_lng = point.longitude;
+
+    // Saltar segmentos horizontales (donde yi ≈ yj)
+    // Los segmentos horizontales no afectan la cuenta de intersecciones
+    if ((yi - yj).abs() < 1e-12) {
+      continue;
+    }
+
+    // Ray casting: verificar si rayo desde punto hacia +X intersecta este segmento
     final intersects =
-        ((yi > point.latitude) != (yj > point.latitude)) &&
-            (point.longitude <
-                (xj - xi) * (point.latitude - yi) /
-                        ((yj - yi).abs() < 1e-12 ? 1e-12 : (yj - yi)) +
+        ((yi > p_lat) != (yj > p_lat)) &&  // Segmento cruza horizontalmente el punto
+            (p_lng <
+                (xj - xi) * (p_lat - yi) / (yj - yi) +  // X de intersección
                     xi);
+    
     if (intersects) inside = !inside;
   }
+  
   return inside;
 }
 
@@ -322,290 +334,64 @@ String? _detectEstadoFromGeometry(
   return null;
 }
 
-Future<List<Predio>> _loadPrediosFromAssetGeoJson() async {
+Future<List<Predio>> _loadPrediosFromBackend() async {
   try {
-    final raw = await rootBundle.loadString('assets/data/TSN_SEG_16_17.geojson');
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) return const [];
+    final response = await http
+      .get(Uri.parse('$_backendBaseUrl/api/v1/predios'))
+        .timeout(const Duration(seconds: 4));
 
-    final features = decoded['features'];
-    if (features is! List) return const [];
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is List) {
+        final remotePredios = decoded
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .map(Predio.fromMap)
+            .toList(growable: false);
 
-    final allPredios = <Predio>[];
-    final municipiosLookup = await _loadMunicipioLookup();
-
-    for (final feature in features.whereType<Map>()) {
-      final featureMap = Map<String, dynamic>.from(feature);
-      final props = Map<String, dynamic>.from(
-        (featureMap['properties'] as Map?) ?? const <String, dynamic>{},
-      );
-      final geometry = (featureMap['geometry'] as Map?) != null
-          ? Map<String, dynamic>.from(featureMap['geometry'] as Map)
-          : null;
-
-      final featureProject =
-          (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
-        final municipioDetectado =
-          _detectMunicipioFromGeometry(geometry, municipiosLookup);
-      final estadoDetectado = _detectEstadoFromGeometry(geometry, municipiosLookup);
-      allPredios.add(
-        Predio.fromMap({
-          'id': (props['ID'] ?? props['id'] ?? allPredios.length).toString(),
-          'clave_catastral':
-              (props['CLAVE'] ?? props['clave'] ?? 'GEOJSON-${allPredios.length + 1}')
-                  .toString(),
-          'tramo': (props['SEGMENTO'] ?? props['segmento'] ?? '').toString(),
-          'tipo_propiedad': 'PRIVADA',
-          'proyecto': featureProject.isEmpty ? null : featureProject,
-          'municipio': municipioDetectado,
-          'estado': estadoDetectado,
-          'estatus': (props['ESTATUS'] ?? props['estatus'] ?? '').toString(),
-          'ejido': (props['ejido'] ?? props['EJIDO'])?.toString(),
-          'geometry': geometry,
-          'created_at': DateTime.now().toIso8601String(),
-        }),
-      );
+        if (remotePredios.isNotEmpty) {
+          return remotePredios;
+        }
+      }
     }
-
-    return allPredios;
   } catch (_) {
-    return const [];
+    // Si el backend de LDDV no está disponible, no mostrar información local.
   }
+
+  return const [];
 }
 
-/// Proveedor que obtiene predios del proyecto activo desde Supabase.
-/// Retorna lista vacía si Supabase no está configurado.
+/// Proveedor que obtiene predios desde el backend de LDDV.
+/// Si el backend no responde, retorna una lista vacía para no mezclar datos locales.
 final prediosConsultaProvider =
     FutureProvider.autoDispose<List<Predio>>((ref) async {
-  // Modo archivo local: evita mezclar datos históricos de backend/Supabase.
-  return _loadPrediosFromAssetGeoJson();
+  return _loadPrediosFromBackend();
 });
 
 final municipiosLimitesProvider =
     FutureProvider.autoDispose<List<MunicipioLimite>>((ref) async {
-  final remoteMunicipios = <MunicipioLimite>[];
   try {
     final response = await http
-        .get(Uri.parse('$_backendBaseUrl/municipios'))
+        .get(Uri.parse('$_backendBaseUrl/api/v1/municipios'))
         .timeout(const Duration(seconds: 2));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       if (data is List) {
-        final remote = data
+        return data
             .whereType<Map>()
             .map((e) => MunicipioLimite.fromMap(Map<String, dynamic>.from(e)))
-            .where((m) => m.nombre.trim().isNotEmpty && m.geometry.isNotEmpty)
+            .where((m) => m.nombre.trim().isNotEmpty)
             .toList();
-        remoteMunicipios.addAll(remote);
       }
     }
   } catch (_) {
-    // Continuar con datos locales.
+    // No mostrar información local si el backend no responde.
   }
 
-  try {
-    Future<List<Map<String, dynamic>>> readFeaturesFromAsset(String assetPath) async {
-      final raw = await rootBundle.loadString(assetPath);
-      final data = jsonDecode(raw);
-      final features = (data is Map<String, dynamic>)
-          ? data['features']
-          : (data is List ? data : null);
-      if (features is! List) return const [];
-      return features
-          .whereType<Map>()
-          .map((f) => Map<String, dynamic>.from(f))
-          .toList();
-    }
-
-    final allFeatures = <Map<String, dynamic>>[];
-    final fallbackAssets = <String>[
-      'assets/data/municipios.geojson',
-      'assets/data/TAP_LIMITES_MUNICIPALES_ESTATALES.geojson',
-    ];
-
-    for (final assetPath in fallbackAssets) {
-      try {
-        allFeatures.addAll(await readFeaturesFromAsset(assetPath));
-      } catch (_) {
-        // Carga parcial: si un asset falla, continuar con el resto.
-      }
-    }
-
-    final localMunicipios = allFeatures
-        .map((feature) {
-          final props = (feature['properties'] as Map?) ?? const {};
-          final p = Map<String, dynamic>.from(props);
-          final nivel = (p['nivel'] ?? p['NIVEL'] ?? '').toString().toLowerCase();
-          final nombre = (p['municipio'] ??
-                  p['MUNICIPIO'] ??
-                  p['nom_mun'] ??
-                  p['NOM_MUN'] ??
-                  p['shapeName'] ??
-                  p['nombre'] ??
-                  p['name'] ??
-                  '')
-              .toString();
-          final estado = (p['estado'] ?? p['ESTADO'] ?? p['shapeGroup'])
-              ?.toString();
-          return <String, dynamic>{
-            'nivel': nivel,
-            'municipio': MunicipioLimite(
-              id: (feature['id'] ?? p['shapeID'] ?? p['id'] ?? nombre).toString(),
-              nombre: nombre,
-              estado: estado,
-              geometry: Map<String, dynamic>.from(
-                (feature['geometry'] as Map?) ?? const <String, dynamic>{},
-              ),
-            ),
-          };
-        })
-        .where((entry) {
-          final nivel = entry['nivel'] as String;
-          // Para lookup de municipio solo incluir límites municipales.
-          return nivel.isEmpty || nivel == 'municipio';
-        })
-        .map((entry) => entry['municipio'] as MunicipioLimite)
-        .where((m) => m.nombre.trim().isNotEmpty && m.geometry.isNotEmpty)
-        .toList();
-
-    final merged = <MunicipioLimite>[...remoteMunicipios, ...localMunicipios];
-    final dedup = <String, MunicipioLimite>{};
-    for (final m in merged) {
-      final key =
-          '${m.nombre.trim().toLowerCase()}|${(m.estado ?? '').trim().toLowerCase()}';
-      dedup[key] = m;
-    }
-    return dedup.values.toList();
-  } catch (_) {
-    return remoteMunicipios;
-  }
+  return const [];
 });
 
 final importedGeoJsonPrediosProvider =
     FutureProvider.autoDispose<List<GeoJsonPredioFeature>>((ref) async {
-  try {
-    Future<List<Map<String, dynamic>>> readFeatures(String assetPath) async {
-      final raw = await rootBundle.loadString(assetPath);
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) return const [];
-      final features = decoded['features'];
-      if (features is! List) return const [];
-      return features
-          .whereType<Map>()
-          .map((f) => Map<String, dynamic>.from(f))
-          .map((f) => {
-                ...f,
-                '__source_asset': assetPath,
-              })
-          .toList();
-    }
-
-    final importAssets = <String>[
-      'assets/data/TSN_SEG_16_17.geojson',
-      'assets/data/ENVOLVENTE_COMPLETA.geojson',
-      'assets/data/TMQ_envolvente2026.geojson',
-      'assets/data/TSN_SEG_13.geojson',
-      'assets/data/TSN_SEG_18.geojson',
-      'assets/data/ESTACIONES_Y_EDIFICIOS_AUXILIARES_TSNL_1805.geojson',
-      'assets/data/AP-T00-SDEF-01-V00-PLA-PR_PRG-36779_25-A02.geojson',
-      'assets/data/TAP_25_05_2026.geojson',
-      'assets/data/pks.geojson',
-    ];
-
-    final mergedFeatures = <Map<String, dynamic>>[];
-    for (final assetPath in importAssets) {
-      try {
-        mergedFeatures.addAll(await readFeatures(assetPath));
-      } catch (_) {
-        // Mantener carga parcial: si un archivo falla, no bloquear los demas.
-      }
-    }
-
-    return mergedFeatures
-        .map((feature) {
-          final props = Map<String, dynamic>.from(
-            (feature['properties'] as Map?) ?? const <String, dynamic>{},
-          );
-          final sourceAsset = (feature['__source_asset'] ?? '').toString().toLowerCase();
-          final isTapEnvelopeAsset =
-              sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02.geojson');
-          final isTsnlEnvelopeAsset =
-              sourceAsset.contains('envolvente_completa.geojson');
-          final isTmqEnvelopeAsset =
-              sourceAsset.contains('tmq_envolvente2026.geojson');
-            final isTapAsset =
-              sourceAsset.contains('/tap_') ||
-              sourceAsset.contains('ap-t00-sdef-01-v00-pla-pr_prg-36779_25-a02');
-            final isTsnlAsset =
-              sourceAsset.contains('/tsn_') || sourceAsset.contains('tsnl');
-            final isTmqAsset =
-              sourceAsset.contains('/tmq_') || sourceAsset.contains('tmq_');
-            final hasEnvolventeSource =
-              sourceAsset.contains('envolvente') ||
-              isTapEnvelopeAsset ||
-              isTsnlEnvelopeAsset;
-          final hasEnvolventeProp = props.values.any(
-            (value) => value.toString().toLowerCase().contains('envolvente'),
-          );
-          final hasEstacionProp = sourceAsset.contains('estaciones_y_edificios');
-          final rawProject =
-              (props['PROYECTO'] ?? props['proyecto'] ?? '').toString().trim().toUpperCase();
-            final inferredEnvelopeProject =
-              isTapEnvelopeAsset
-                  ? 'TAP'
-                  : (isTsnlEnvelopeAsset
-                      ? 'TSNL'
-                      : (isTmqEnvelopeAsset ? 'TMQ' : ''));
-            final inferredProject = inferredEnvelopeProject.isNotEmpty
-              ? inferredEnvelopeProject
-              : (isTapAsset
-                  ? 'TAP'
-                  : (isTsnlAsset ? 'TSNL' : (isTmqAsset ? 'TMQ' : '')));
-          final finalProject =
-              rawProject.isNotEmpty
-                ? rawProject
-                : ((hasEnvolventeSource || hasEnvolventeProp)
-                  ? inferredEnvelopeProject
-                  : inferredProject);
-          final enrichedProps = <String, dynamic>{
-            ...props,
-            if (finalProject.isNotEmpty) 'PROYECTO': finalProject,
-            if (hasEnvolventeSource || hasEnvolventeProp || isTmqEnvelopeAsset) 'TIPO_CAPA': 'ENVOLVENTE',
-          };
-          final propsWithMeta = <String, dynamic>{
-            ...enrichedProps,
-            '__source_asset': sourceAsset,
-          };
-          return GeoJsonPredioFeature(
-            id: _extractDisplayId(enrichedProps),
-            estatus: (enrichedProps['ESTATUS'] ?? enrichedProps['estatus'])?.toString(),
-            esEnvolvente: hasEnvolventeSource || hasEnvolventeProp,
-            esEstacion: hasEstacionProp,
-            geometry: Map<String, dynamic>.from(
-              (feature['geometry'] as Map?) ?? const <String, dynamic>{},
-            ),
-            properties: propsWithMeta,
-          );
-        })
-        .where((f) => f.geometry.isNotEmpty)
-        .toList();
-  } catch (_) {
-    return const [];
-  }
+  return const [];
 });
-
-Future<Map<String, dynamic>> autofillMunicipiosDesdeLimites({
-  bool overwrite = false,
-}) async {
-  final uri = Uri.parse('$_backendBaseUrl/predios/autofill-municipio')
-      .replace(queryParameters: {'overwrite': overwrite.toString()});
-  final response = await http.post(uri);
-  if (response.statusCode != 200) {
-    throw Exception('No se pudo completar municipio desde límites');
-  }
-  final payload = jsonDecode(response.body);
-  if (payload is Map<String, dynamic>) {
-    return payload;
-  }
-  return <String, dynamic>{};
-}

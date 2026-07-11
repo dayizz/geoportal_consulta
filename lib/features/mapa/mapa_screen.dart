@@ -194,7 +194,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     _spinCtrl.repeat();
     _didInitialFocus = false;
     _didImportedGeoJsonFocus = false;
-    // Invalida el provider para que vuelva a cargar desde Supabase
+    // Invalida el provider para que vuelva a cargar desde el backend de LDDV
     ref.invalidate(prediosConsultaProvider);
     // Esperar a que el future resuelva
     await ref.read(prediosConsultaProvider.future).catchError((_) => <Predio>[]);
