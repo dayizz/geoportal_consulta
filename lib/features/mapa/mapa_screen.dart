@@ -1,4 +1,5 @@
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -157,6 +158,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   late AnimationController _spinCtrl;
   double _currentZoom = _defaultZoom;
   int _zoomRenderStep = (_defaultZoom * 2).round();
+  Timer? _zoomDebounce;
 
   // Caches para optimización
   late GeometryCache _geometryCache;
@@ -181,6 +183,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
 
   @override
   void dispose() {
+    _zoomDebounce?.cancel();
     _spinCtrl.dispose();
     _geometryCache.clear();
     _spatialIndex.clear();
@@ -315,17 +318,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final drawnPolylineKeys = <String>{};
     final bucketSize = _bucketSizeForZoom(_currentZoom);
     final bucketed = <String, _HeatBucket>{};
-    // Nueva jerarquía de capas y etiquetas por zoom
-    final showContinentLabels = false;
-    final showCountryBorders = false;
-    final showCountryLabels = false;
-    final showStateBorders = false;
-    final showStateLabels = false;
-    final showCityLabels = false;
-    final showMetropolitanRoutes = false;
-    final showStreetLabels = false;
-    final showNeighborhoodLabels = false;
-    final showExtremeDetailLabels = false;
     final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
@@ -600,35 +592,23 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         onPositionChanged: (position, hasGesture) {
           final nextZoom = position.zoom ?? _currentZoom;
           final nextStep = (nextZoom * 2).round();
-          if (nextStep != _zoomRenderStep) {
+          if (nextStep == _zoomRenderStep) return;
+          // Se posterga el recálculo de polígonos/marcadores mientras el
+          // usuario sigue haciendo zoom o desplazando el mapa, para no
+          // bloquear el hilo de UI en cada paso intermedio del gesto y
+          // evitar que la carga de tiles se vea entrecortada/"rota".
+          _zoomDebounce?.cancel();
+          _zoomDebounce = Timer(const Duration(milliseconds: 120), () {
+            if (!mounted) return;
             setState(() {
               _currentZoom = nextZoom;
               _zoomRenderStep = nextStep;
             });
-          }
+          });
         },
       ),
       children: [
-        TileLayer(
-          urlTemplate: _getTileUrl(),
-          userAgentPackageName: 'mx.sao.geoportal_consulta',
-          maxZoom: 23,
-        ),
-        // Nivel 0-3: Vista global, nombres de continentes/planeta (solo base, sin overlays)
-        // Nivel 4-9: Países, estados, grandes cadenas montañosas y sus nombres
-        // Envolventes se renderizan arriba para mantener visibilidad.
-        if (showCountryBorders)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
-          ),
-        if (showStateBorders)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Administrative_Boundaries/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
-          ),
+        ..._buildBaseLayers(),
         // Nivel 10-14: Ciudades, áreas metropolitanas, rutas, avenidas principales y nombres
         // Los núcleos agrarios deben quedar por debajo del resto de capas vectoriales.
         if (nucleoPolygons.isNotEmpty)
@@ -654,26 +634,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           MarkerLayer(markers: predioGroupMarkers),
         if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
           MarkerLayer(markers: importedPkMarkers),
-        // Nivel 15-17: Calles, vecindarios, colonias, parques y nombres
-        if (showStreetLabels)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
-          ),
-        if (showNeighborhoodLabels)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
-          ),
-        // Nivel 18-23: Detalle extremo, edificios, manzanas, entradas y nombres
-        if (showExtremeDetailLabels)
-          TileLayer(
-            urlTemplate: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-            userAgentPackageName: 'mx.sao.geoportal_consulta',
-            maxZoom: 23,
-          ),
         if (_mostrarEtiquetas && sedatuLabelMarkers.isNotEmpty)
           MarkerLayer(markers: sedatuLabelMarkers),
         if (pkFilterEnabled && _mostrarPks && selectedFeaturePin.isNotEmpty)
@@ -4074,11 +4034,56 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     return const Color(0xFFFBC02D); // balanced: yellow
   }
 
-  String _getTileUrl() {
-    if (_baseLayer == _BaseLayer.satelital) {
-      return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+  // Mapa base "Estándar": stripmap (World_Street_Map) con nombres de calles,
+  // colonias, ciudades, etc. ya incluidos en el propio tile (sin overlays).
+  static const _streetMapUrl =
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+
+  // Mapa base "Satelital": imagen aérea + overlays transparentes de Esri
+  // (vialidades y límites/nombres de lugares) para formar un híbrido con
+  // calles, avenidas y etiquetas sobre la imagen satelital.
+  static const _satelliteImageryUrl =
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+  static const _satelliteRoadsOverlayUrl =
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}';
+  static const _satelliteLabelsOverlayUrl =
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+
+  /// Construye las capas base de tiles según el proveedor seleccionado,
+  /// con ajustes que evitan que la imagen se "rompa" o se vea parchada
+  /// al desplazarse o hacer zoom rápidamente:
+  /// - `maxNativeZoom` evita pedir niveles de zoom que el servidor no tiene
+  ///   (lo que antes devolvía tiles vacíos/erróneos); el mapa sigue
+  ///   permitiendo acercarse más gracias a `maxZoom`, sólo que reescala.
+  /// - `tileUpdateTransformer` limita ráfagas de peticiones simultáneas
+  ///   durante gestos rápidos de pan/zoom.
+  /// - `keepBuffer`/`panBuffer` mantienen más tiles vecinos en caché para
+  ///   no dejar huecos al desplazarse.
+  /// - `evictErrorTileStrategy` reintenta los tiles que fallaron al volver
+  ///   a quedar visibles, en vez de dejarlos rotos permanentemente.
+  List<Widget> _buildBaseLayers() {
+    TileLayer tile(String url) {
+      return TileLayer(
+        urlTemplate: url,
+        userAgentPackageName: 'mx.sao.geoportal_consulta',
+        maxZoom: 22,
+        maxNativeZoom: 19,
+        keepBuffer: 3,
+        panBuffer: 2,
+        evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
+        tileUpdateTransformer:
+            TileUpdateTransformers.throttle(const Duration(milliseconds: 150)),
+      );
     }
-    return 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+
+    if (_baseLayer == _BaseLayer.satelital) {
+      return [
+        tile(_satelliteImageryUrl),
+        tile(_satelliteRoadsOverlayUrl),
+        tile(_satelliteLabelsOverlayUrl),
+      ];
+    }
+    return [tile(_streetMapUrl)];
   }
 
   Widget _buildLayersDropdown() {
@@ -4096,7 +4101,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PopupMenuItem<_BaseLayer>(
             value: _BaseLayer.estandar,
             child: Text(
-              'Estándar',
+              'Estándar (con etiquetas)',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: _baseLayer == _BaseLayer.estandar
@@ -4108,7 +4113,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PopupMenuItem<_BaseLayer>(
             value: _BaseLayer.satelital,
             child: Text(
-              'Satelital',
+              'Satelital (con etiquetas)',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: _baseLayer == _BaseLayer.satelital
