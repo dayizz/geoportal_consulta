@@ -30,18 +30,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Generar manifiesto de GeoJSON
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          root = Path('assets/data')
-          manifest = [f'assets/data/{path.name}' for path in sorted(root.glob('*.geojson'))]
-          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-          print('\n'.join(manifest))
-          PY
-
-
       - name: Build web
         run: flutter build web --release --pwa-strategy=none --base-href /geoportal_consulta/
 
