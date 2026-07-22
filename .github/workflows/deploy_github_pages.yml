@@ -31,7 +31,13 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release --pwa-strategy=none --base-href /geoportal_consulta/
+        env:
+          GEOPORTAL_CONSULTA_USER: ${{ secrets.GEOPORTAL_CONSULTA_USER }}
+          GEOPORTAL_CONSULTA_PASSWORD: ${{ secrets.GEOPORTAL_CONSULTA_PASSWORD }}
+        run: |
+          flutter build web --release --pwa-strategy=none --base-href /geoportal_consulta/ \
+            --dart-define=GEOPORTAL_CONSULTA_USER="$GEOPORTAL_CONSULTA_USER" \
+            --dart-define=GEOPORTAL_CONSULTA_PASSWORD="$GEOPORTAL_CONSULTA_PASSWORD"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
