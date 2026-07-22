@@ -89,6 +89,24 @@ enum _LiberacionFilter { todos, liberados, noLiberados }
 
 enum _BaseLayer { estandar, satelital }
 
+/// Caja delimitadora simple usada para el recorte por viewport: evita
+/// procesar geometría/marcadores de predios o features que están fuera
+/// de la zona visible (con margen) al desplazarse o hacer zoom.
+class _BBox {
+  const _BBox(this.minLat, this.maxLat, this.minLng, this.maxLng);
+
+  final double minLat;
+  final double maxLat;
+  final double minLng;
+  final double maxLng;
+
+  bool intersects(LatLngBounds bounds) =>
+      minLat <= bounds.north &&
+      maxLat >= bounds.south &&
+      minLng <= bounds.east &&
+      maxLng >= bounds.west;
+}
+
 class _HeatBucket {
   _HeatBucket({
     required this.center,
@@ -164,6 +182,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   late GeometryCache _geometryCache;
   late SpatialIndex _spatialIndex;
   late MemoizedCache<String, LatLng> _centroidCache;
+  late MemoizedCache<String, _BBox?> _bboxCache;
 
   static const _defaultCenter = LatLng(20.72, -100.35);
   static const _defaultZoom = 10.0;
@@ -174,6 +193,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     _geometryCache = GeometryCache();
     _spatialIndex = SpatialIndex();
     _centroidCache = MemoizedCache<String, LatLng>();
+    _bboxCache = MemoizedCache<String, _BBox?>();
     _spinCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -188,6 +208,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     _geometryCache.clear();
     _spatialIndex.clear();
     _centroidCache.clear();
+    _bboxCache.clear();
     super.dispose();
   }
 
@@ -292,6 +313,115 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     );
   }
 
+  // Umbral a partir del cual vale la pena pagar el costo del recorte por
+  // viewport; con pocos elementos filtrar no aporta y solo suma trabajo.
+  static const _viewportCullingThreshold = 150;
+
+  /// Límites visibles actuales del mapa, con margen para evitar que
+  /// aparezcan/desaparezcan elementos justo al desplazarse un poco.
+  /// Devuelve null en el primer build (el controlador aún no está
+  /// adjunto a ningún `FlutterMap` renderizado).
+  LatLngBounds? _paddedViewportBounds() {
+    LatLngBounds bounds;
+    try {
+      bounds = _mapCtrl.camera.visibleBounds;
+    } catch (_) {
+      return null;
+    }
+    final latPad = (bounds.north - bounds.south).abs() * 0.6;
+    final lngPad = (bounds.east - bounds.west).abs() * 0.6;
+    return LatLngBounds(
+      LatLng(bounds.north + latPad, bounds.west - lngPad),
+      LatLng(bounds.south - latPad, bounds.east + lngPad),
+    );
+  }
+
+  _BBox? _bboxFromPoints(Iterable<LatLng> points) {
+    double? minLat, maxLat, minLng, maxLng;
+    for (final p in points) {
+      minLat = (minLat == null) ? p.latitude : math.min(minLat, p.latitude);
+      maxLat = (maxLat == null) ? p.latitude : math.max(maxLat, p.latitude);
+      minLng = (minLng == null) ? p.longitude : math.min(minLng, p.longitude);
+      maxLng = (maxLng == null) ? p.longitude : math.max(maxLng, p.longitude);
+    }
+    if (minLat == null) return null;
+    return _BBox(minLat, maxLat!, minLng!, maxLng!);
+  }
+
+  _BBox? _boundingBoxForPredio(Predio p) {
+    final geo = p.geometry;
+    if (geo != null) {
+      final key = 'predio-bbox:${identityHashCode(geo)}';
+      return _bboxCache.getOrCompute(
+        key,
+        () => _bboxFromPoints(_extractPolygons(geo).expand((r) => r)),
+      );
+    }
+    if (p.latitud != null && p.longitud != null) {
+      final lat = p.latitud!;
+      final lng = p.longitud!;
+      return _BBox(lat, lat, lng, lng);
+    }
+    return null;
+  }
+
+  _BBox? _boundingBoxForFeature(GeoJsonPredioFeature f) {
+    final geo = f.geometry;
+    final key = 'feat-bbox:${identityHashCode(geo)}';
+    return _bboxCache.getOrCompute(key, () {
+      final polys = _extractPolygons(geo);
+      if (polys.isNotEmpty) {
+        final bbox = _bboxFromPoints(polys.expand((r) => r));
+        if (bbox != null) return bbox;
+      }
+      final lines = _extractPolylines(geo);
+      if (lines.isNotEmpty) {
+        final bbox = _bboxFromPoints(lines.expand((l) => l));
+        if (bbox != null) return bbox;
+      }
+      final point = _extractRepresentativePoint(geo);
+      if (point != null) {
+        return _BBox(
+          point.latitude,
+          point.latitude,
+          point.longitude,
+          point.longitude,
+        );
+      }
+      return null;
+    });
+  }
+
+  /// Filtra predios fuera del viewport visible (con margen) para no pagar
+  /// el costo de extraer/simplificar geometría ni construir marcadores de
+  /// elementos que no se van a ver. Los predios sin geometría/posición
+  /// determinable nunca se descartan (se mantienen visibles por defecto).
+  List<Predio> _cullPrediosToViewport(
+    List<Predio> predios,
+    LatLngBounds? bounds,
+  ) {
+    if (bounds == null || predios.length <= _viewportCullingThreshold) {
+      return predios;
+    }
+    return predios.where((p) {
+      final bbox = _boundingBoxForPredio(p);
+      return bbox == null || bbox.intersects(bounds);
+    }).toList();
+  }
+
+  List<GeoJsonPredioFeature> _cullImportedToViewport(
+    List<GeoJsonPredioFeature> features,
+    LatLngBounds? bounds,
+  ) {
+    if (bounds == null || features.length <= _viewportCullingThreshold) {
+      return features;
+    }
+    return features.where((f) {
+      final bbox = _boundingBoxForFeature(f);
+      return bbox == null || bbox.intersects(bounds);
+    }).toList();
+  }
+
   Widget _buildMap(
     List<Predio> predios,
     List<MunicipioLimite> municipios,
@@ -302,6 +432,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final filteredImportedGeoJson = _applyAllImportedFilters(importedGeoJsonPredios);
     _ensureImportedGeoJsonFocus(filteredImportedGeoJson);
     _ensureInitialFocus(predios, importedGeoJsonPredios);
+    // Recorte por viewport: evita procesar geometría/marcadores de
+    // elementos fuera de la zona visible (con margen), que era el costo
+    // dominante al ajustar el mapa en cada cambio de zoom/desplazamiento.
+    final viewportBounds = _paddedViewportBounds();
+    final visiblePredios = _cullPrediosToViewport(filteredPredios, viewportBounds);
+    final visibleImportedGeoJson =
+        _cullImportedToViewport(filteredImportedGeoJson, viewportBounds);
     final polygons = <Polygon>[];
     final nucleoPolygons = <Polygon>[];
     final envolventePolygons = <Polygon>[];
@@ -325,7 +462,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     bool shouldDrawImportedGroups() =>
       _agruparMarcadores && bucketSize > 0;
 
-    for (final p in filteredPredios) {
+    for (final p in visiblePredios) {
         final estatus = p.estatus?.trim().toLowerCase();
         final color = (estatus == 'liberado')
           ? const Color(0xFFCDDC39)
@@ -381,7 +518,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    for (final feature in filteredImportedGeoJson) {
+    for (final feature in visibleImportedGeoJson) {
       final isEnvelopeFeature = _isEnvelopeFeature(feature);
       final isTmqEnvelopeFeature = _isTmqEnvelopeFeature(feature);
       final rings = _extractPolygons(feature.geometry);
@@ -4071,16 +4208,23 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         keepBuffer: 3,
         panBuffer: 2,
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
+        // Con el hibrido satelital hay hasta 3 capas de tiles pidiendo al
+        // mismo tiempo; se limita un poco mas la rafaga de peticiones por
+        // gesto para que no compitan entre si y se vean "romper" al hacer
+        // zoom o desplazarse rapido.
         tileUpdateTransformer:
-            TileUpdateTransformers.throttle(const Duration(milliseconds: 150)),
+            TileUpdateTransformers.throttle(const Duration(milliseconds: 200)),
       );
     }
 
     if (_baseLayer == _BaseLayer.satelital) {
+      // A zoom muy bajo (vista de pais/continente) los rotulos de calles y
+      // lugares no aportan y solo suman 2x peticiones de red; se omiten.
+      final showLabelOverlays = _currentZoom >= 6;
       return [
         tile(_satelliteImageryUrl),
-        tile(_satelliteRoadsOverlayUrl),
-        tile(_satelliteLabelsOverlayUrl),
+        if (showLabelOverlays) tile(_satelliteRoadsOverlayUrl),
+        if (showLabelOverlays) tile(_satelliteLabelsOverlayUrl),
       ];
     }
     return [tile(_streetMapUrl)];
