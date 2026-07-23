@@ -4249,35 +4249,50 @@ class _ColorModeToggle extends StatelessWidget {
         color: Colors.white.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _tab('Estado', _ColorMode.estado),
-          _tab('Tipo', _ColorMode.tipo),
+      child: PopupMenuButton<_ColorMode>(
+        tooltip: mode == _ColorMode.estado
+            ? 'Coloreando por: Estatus'
+            : 'Coloreando por: Tipo de propiedad',
+        initialValue: mode,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        onSelected: onChanged,
+        itemBuilder: (context) => [
+          _item('Estatus', _ColorMode.estado),
+          _item('Tipo de propiedad', _ColorMode.tipo),
         ],
+        child: const Padding(
+          padding: EdgeInsets.all(8),
+          child: Icon(
+            Icons.remove_red_eye_outlined,
+            color: Colors.white,
+            size: 20,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _tab(String label, _ColorMode value) {
+  PopupMenuItem<_ColorMode> _item(String label, _ColorMode value) {
     final active = mode == value;
-    return GestureDetector(
-      onTap: () => onChanged(value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color:
-              active ? Colors.white.withOpacity(0.9) : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: active ? const Color(0xFF1B4332) : Colors.white70,
+    return PopupMenuItem<_ColorMode>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(
+            active ? Icons.check_circle_rounded : Icons.circle_outlined,
+            size: 16,
+            color: active ? const Color(0xFF1B4332) : Colors.grey,
           ),
-        ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
