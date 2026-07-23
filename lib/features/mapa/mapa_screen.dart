@@ -3294,19 +3294,124 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }
 
   List<LatLng> _toLatLngs(List raw) {
-    final points = <LatLng>[];
+    final pairs = <(double, double)>[];
     for (final c in raw) {
       final coord = c as List;
-      final lng = (coord[0] as num).toDouble();
-      final lat = (coord[1] as num).toDouble();
-
-      // Descarta coordenadas fuera de rango geográfico (datos proyectados o corruptos).
-      if (!lng.isFinite || !lat.isFinite) continue;
-      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
-
-      points.add(LatLng(lat, lng));
+      final x = (coord[0] as num?)?.toDouble();
+      final y = (coord[1] as num?)?.toDouble();
+      if (x == null || y == null || !x.isFinite || !y.isFinite) continue;
+      pairs.add((x, y));
     }
-    return points;
+    if (pairs.isEmpty) return const [];
+
+    // 1) GeoJSON estándar [lng, lat] (o invertido [lat, lng]).
+    final direct = pairs
+        .map((p) {
+          final x = p.$1;
+          final y = p.$2;
+          if (_isValidLatLng(lat: y, lng: x)) return LatLng(y, x);
+          if (_isValidLatLng(lat: x, lng: y)) return LatLng(x, y);
+          return null;
+        })
+        .whereType<LatLng>()
+        .toList();
+    if (direct.length >= 3) return direct;
+
+    // 2) Fallback UTM (común en archivos geolocalizados de México: los
+    // predios importados suelen traer la geometría en coordenadas
+    // proyectadas, no en grados).
+    final zone = _detectMexicoUtmZone(
+      pairs.map((p) => p.$1).toList(),
+      pairs.map((p) => p.$2).toList(),
+    );
+    if (zone == null) return direct;
+
+    return pairs
+        .map((p) {
+          final ll = _utmToWgs84(p.$1, p.$2, zone);
+          final lng = ll[0];
+          final lat = ll[1];
+          if (!_isValidLatLng(lat: lat, lng: lng)) return null;
+          return LatLng(lat, lng);
+        })
+        .whereType<LatLng>()
+        .toList();
+  }
+
+  bool _isValidLatLng({required double lat, required double lng}) {
+    return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  }
+
+  int? _detectMexicoUtmZone(List<double> sampleX, List<double> sampleY) {
+    if (sampleX.isEmpty || sampleY.isEmpty) return null;
+    final x = sampleX.first;
+    final y = sampleY.first;
+    for (final zone in [14, 15, 13, 16]) {
+      final ll = _utmToWgs84(x, y, zone);
+      final lng = ll[0];
+      final lat = ll[1];
+      if (lat >= 13 && lat <= 34 && lng >= -120 && lng <= -84) {
+        return zone;
+      }
+    }
+    return null;
+  }
+
+  List<double> _utmToWgs84(double easting, double northing, int zone,
+      {bool isNorth = true}) {
+    const a = 6378137.0;
+    const f = 1 / 298.257223563;
+    const k0 = 0.9996;
+    const e0 = 500000.0;
+    final e2 = 2 * f - f * f;
+    final ePrime2 = e2 / (1 - e2);
+    final e1 = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2));
+    final x = easting - e0;
+    final y = isNorth ? northing : northing - 10000000.0;
+    final m = y / k0;
+    final mu =
+        m / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
+    final phi1 = mu +
+        (3 * e1 / 2 - 27 * math.pow(e1, 3) / 32) * math.sin(2 * mu) +
+        (21 * e1 * e1 / 16 - 55 * math.pow(e1, 4) / 32) * math.sin(4 * mu) +
+        (151 * math.pow(e1, 3) / 96) * math.sin(6 * mu) +
+        (1097 * math.pow(e1, 4) / 512) * math.sin(8 * mu);
+    final sinPhi1 = math.sin(phi1);
+    final cosPhi1 = math.cos(phi1);
+    final tanPhi1 = math.tan(phi1);
+    final n1 = a / math.sqrt(1 - e2 * sinPhi1 * sinPhi1);
+    final t1 = tanPhi1 * tanPhi1;
+    final c1 = ePrime2 * cosPhi1 * cosPhi1;
+    final r1 = a * (1 - e2) / math.pow(1 - e2 * sinPhi1 * sinPhi1, 1.5);
+    final d = x / (n1 * k0);
+    final lat = phi1 -
+        (n1 * tanPhi1 / r1) *
+            (d * d / 2 -
+                (5 + 3 * t1 + 10 * c1 - 4 * c1 * c1 - 9 * ePrime2) *
+                    math.pow(d, 4) /
+                    24 +
+                (61 +
+                        90 * t1 +
+                        298 * c1 +
+                        45 * t1 * t1 -
+                        252 * ePrime2 -
+                        3 * c1 * c1) *
+                    math.pow(d, 6) /
+                    720);
+    final lambda0 = ((zone - 1) * 6 - 180 + 3) * math.pi / 180;
+    final lng = lambda0 +
+        (d -
+                (1 + 2 * t1 + c1) * math.pow(d, 3) / 6 +
+                (5 -
+                        2 * c1 +
+                        28 * t1 -
+                        3 * c1 * c1 +
+                        8 * ePrime2 +
+                        24 * t1 * t1) *
+                    math.pow(d, 5) /
+                    120) /
+            cosPhi1;
+    return [lng * 180 / math.pi, lat * 180 / math.pi];
   }
 
   LatLng _centroid(List<LatLng> points) {

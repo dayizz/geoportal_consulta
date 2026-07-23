@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -335,38 +336,20 @@ String? _detectEstadoFromGeometry(
   return null;
 }
 
-Future<List<Predio>> _loadPrediosFromBackend() async {
-  try {
-    final response = await http
-      .get(Uri.parse('$_backendBaseUrl/api/v1/predios'))
-        .timeout(const Duration(seconds: 4));
-
-    if (response.statusCode == 200) {
-      final decoded = jsonDecode(response.body);
-      if (decoded is List) {
-        final remotePredios = decoded
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .map(Predio.fromMap)
-            .toList(growable: false);
-
-        if (remotePredios.isNotEmpty) {
-          return remotePredios;
-        }
-      }
-    }
-  } catch (_) {
-    // Si el backend de LDDV no está disponible, no mostrar información local.
-  }
-
-  return const [];
-}
-
-/// Proveedor que obtiene predios desde el backend de LDDV.
-/// Si el backend no responde, retorna una lista vacía para no mezclar datos locales.
+/// Proveedor que escucha en tiempo real la colección pública y saneada
+/// `predios_publicos` en Firestore (espejo de los predios del Geoportal de
+/// Gestión, sin datos de propietario/contacto/documentos). Incluye todos los
+/// proyectos; el filtrado por proyecto ya se hace en la UI (mapa_screen).
 final prediosConsultaProvider =
-    FutureProvider.autoDispose<List<Predio>>((ref) async {
-  return _loadPrediosFromBackend();
+    StreamProvider.autoDispose<List<Predio>>((ref) {
+  return FirebaseFirestore.instance
+      .collection('predios_publicos')
+      .snapshots()
+      .map(
+        (snap) => snap.docs
+            .map((doc) => Predio.fromMap({...doc.data(), 'id': doc.id}))
+            .toList(growable: false),
+      );
 });
 
 final municipiosLimitesProvider =
