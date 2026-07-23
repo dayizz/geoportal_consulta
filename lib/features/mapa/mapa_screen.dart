@@ -107,22 +107,6 @@ class _BBox {
       maxLng >= bounds.west;
 }
 
-class _HeatBucket {
-  _HeatBucket({
-    required this.center,
-    this.count = 0,
-    this.liberados = 0,
-    this.noLiberados = 0,
-    this.sample,
-  });
-
-  LatLng center;
-  int count;
-  int liberados;
-  int noLiberados;
-  Predio? sample;
-}
-
 class _NucleoAgrarioSummary {
   const _NucleoAgrarioSummary({
     required this.nombre,
@@ -156,7 +140,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   GeoJsonPredioFeature? _selectedImportedFeature;
   bool _filterSoloEstaciones = false;
   bool _mostrarNucleosAgrarios = true;
-  bool _agruparMarcadores = true;
   bool _mostrarEtiquetas = false;
   bool _mostrarPks = false;
   Set<String> _selectedTipoProyectos = {};
@@ -450,17 +433,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final sedatuLabelMarkers = <Marker>[];
     final municipalPolygons = <Polygon>[];
     final municipalPolylines = <Polyline>[];
-    final predioGroupMarkers = <Marker>[];
     final drawnPolygonKeys = <String>{};
     final drawnPolylineKeys = <String>{};
-    final bucketSize = _bucketSizeForZoom(_currentZoom);
-    final bucketed = <String, _HeatBucket>{};
     final showMunicipalBorders = _currentZoom >= 10;
 
     // Polígonos y límites
     bool shouldDrawPolygons() => _currentZoom >= 10;
-    bool shouldDrawImportedGroups() =>
-      _agruparMarcadores && bucketSize > 0;
 
     for (final p in visiblePredios) {
         final estatus = p.estatus?.trim().toLowerCase();
@@ -511,10 +489,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             _buildSedatuLabelMarker(markerPoint, sedatuClave),
           );
         }
-      }
-      if (_agruparMarcadores && bucketSize > 0) {
-        final bucket = _putInBucket(bucketed, p, markerPoint, bucketSize);
-        bucket.sample ??= p;
       }
     }
 
@@ -617,23 +591,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         continue;
       }
 
-      if (shouldDrawImportedGroups() &&
-          markerPoint != null &&
-          !isEnvelopeFeature &&
-          !isNucleoAgrario) {
-        final bucket = _putPointInCountBucket(bucketed, markerPoint, bucketSize);
-        final estatusLower = feature.estatus?.trim().toLowerCase() ?? '';
-        if (estatusLower == 'liberado') bucket.liberados++;
-        if (estatusLower.contains('no liberado')) bucket.noLiberados++;
-      }
-    }
-
-    if (_agruparMarcadores && bucketSize > 0) {
-      final mergedBuckets =
-          _mergeOverlappingBuckets(bucketed.values.toList(), bucketSize);
-      for (final bucket in mergedBuckets) {
-        predioGroupMarkers.add(_buildHeatMarker(bucket));
-      }
     }
 
     // Multi-municipio: resalta todos los seleccionados
@@ -767,8 +724,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PolygonLayer(polygons: envolventePolygons),
         if (envolventePolylines.isNotEmpty)
           PolylineLayer(polylines: envolventePolylines),
-        if (_agruparMarcadores && predioGroupMarkers.isNotEmpty)
-          MarkerLayer(markers: predioGroupMarkers),
         if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
           MarkerLayer(markers: importedPkMarkers),
         if (_mostrarEtiquetas && sedatuLabelMarkers.isNotEmpty)
@@ -859,155 +814,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ),
       );
     });
-  }
-
-  Marker _buildHeatMarker(_HeatBucket bucket) {
-    final color = _heatColor(bucket);
-    return _buildCountMarker(bucket.center, bucket.count, color);
-  }
-
-  Marker _buildCountMarker(LatLng center, int count, Color color) {
-    final size = count >= 25
-        ? 50.0
-        : count >= 10
-            ? 42.0
-            : 36.0;
-    return Marker(
-      point: center,
-      width: size,
-      height: size,
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Text(
-          '$count',
-          style: GoogleFonts.inter(
-            color: Colors.white,
-            fontSize: count >= 100 ? 11 : 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-
-  _HeatBucket _putInBucket(
-    Map<String, _HeatBucket> buckets,
-    Predio p,
-    LatLng point,
-    double bucketSize,
-  ) {
-    final latIdx = (point.latitude / bucketSize).floor();
-    final lngIdx = (point.longitude / bucketSize).floor();
-    final key = '$latIdx:$lngIdx';
-
-    final existing = buckets[key];
-    if (existing == null) {
-      final seed = _HeatBucket(center: point, count: 1);
-      if (_isLiberado(p)) seed.liberados = 1;
-      if (_isNoLiberado(p)) seed.noLiberados = 1;
-      buckets[key] = seed;
-      return seed;
-    }
-
-    final nextCount = existing.count + 1;
-    existing.center = LatLng(
-      ((existing.center.latitude * existing.count) + point.latitude) / nextCount,
-      ((existing.center.longitude * existing.count) + point.longitude) /
-          nextCount,
-    );
-    existing.count = nextCount;
-    if (_isLiberado(p)) existing.liberados++;
-    if (_isNoLiberado(p)) existing.noLiberados++;
-    return existing;
-  }
-
-  _HeatBucket _putPointInCountBucket(
-    Map<String, _HeatBucket> buckets,
-    LatLng point,
-    double bucketSize,
-  ) {
-    final latIdx = (point.latitude / bucketSize).floor();
-    final lngIdx = (point.longitude / bucketSize).floor();
-    final key = '$latIdx:$lngIdx';
-
-    final existing = buckets[key];
-    if (existing == null) {
-      final seed = _HeatBucket(center: point, count: 1);
-      buckets[key] = seed;
-      return seed;
-    }
-
-    final nextCount = existing.count + 1;
-    existing.center = LatLng(
-      ((existing.center.latitude * existing.count) + point.latitude) / nextCount,
-      ((existing.center.longitude * existing.count) + point.longitude) /
-          nextCount,
-    );
-    existing.count = nextCount;
-    return existing;
-  }
-
-  List<_HeatBucket> _mergeOverlappingBuckets(
-    List<_HeatBucket> buckets,
-    double bucketSize,
-  ) {
-    // Evitar costo O(n^2) en zoom lejano con muchos grupos.
-    if (buckets.length > 220) return buckets;
-    if (buckets.length <= 1) return buckets;
-
-    final pending = [...buckets]..sort((a, b) => b.count.compareTo(a.count));
-    final merged = <_HeatBucket>[];
-    final mergeThreshold = bucketSize * 0.85;
-
-    while (pending.isNotEmpty) {
-      final base = pending.removeAt(0);
-      int i = 0;
-      while (i < pending.length) {
-        final candidate = pending[i];
-        final distance = _distanceBetweenPoints(base.center, candidate.center);
-        if (distance <= mergeThreshold) {
-          final total = base.count + candidate.count;
-          base.center = LatLng(
-            ((base.center.latitude * base.count) +
-                    (candidate.center.latitude * candidate.count)) /
-                total,
-            ((base.center.longitude * base.count) +
-                    (candidate.center.longitude * candidate.count)) /
-                total,
-          );
-          base.count = total;
-          base.liberados += candidate.liberados;
-          base.noLiberados += candidate.noLiberados;
-          base.sample ??= candidate.sample;
-          pending.removeAt(i);
-          continue;
-        }
-        i++;
-      }
-      merged.add(base);
-    }
-
-    return merged;
-  }
-
-  double _distanceBetweenPoints(LatLng a, LatLng b) {
-    final avgLatRad = ((a.latitude + b.latitude) / 2) * (math.pi / 180);
-    final latDelta = (a.latitude - b.latitude).abs();
-    final lngDelta =
-        ((a.longitude - b.longitude).abs() * math.cos(avgLatRad)).abs();
-    return math.sqrt((latDelta * latDelta) + (lngDelta * lngDelta));
   }
 
   Marker _buildMarker(Predio p, LatLng pos, Color color) {
@@ -1368,15 +1174,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _projectFilterChip(tipoProyectoCounts),
-                          const SizedBox(width: 8),
-                          _quickToggleChip(
-                            label: 'Agrupación',
-                            isOn: _agruparMarcadores,
-                            icon: Icons.bubble_chart_rounded,
-                            onTap: () => setState(() {
-                              _agruparMarcadores = !_agruparMarcadores;
-                            }),
-                          ),
                           const SizedBox(width: 8),
                           _quickToggleChip(
                             label: 'Etiquetas',
@@ -3269,28 +3066,71 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   }) {
     if (points.length < 8) return points;
 
-    final stride = zoom >= 13
-        ? 1
+    // Tolerancia en grados (~0.0001° ≈ 11 m). Se usa Douglas-Peucker en vez
+    // de un muestreo por índice fijo: este último descartaba vértices según
+    // su posición en la lista, no según su aporte a la forma, por lo que el
+    // contorno de un mismo predio cambiaba visiblemente entre niveles de
+    // zoom (parecía "deformarse" al acercar/alejar).
+    final tolerance = zoom >= 13
+        ? 0.0
         : zoom >= 12
-            ? 2
+            ? 0.00003
             : zoom >= 11
-                ? 3
-                : 5;
-    if (stride <= 1) return points;
+                ? 0.00006
+                : 0.00015;
+    if (tolerance <= 0) return points;
 
-    final sampled = <LatLng>[];
-    for (int i = 0; i < points.length; i += stride) {
-      sampled.add(points[i]);
+    final simplified = _douglasPeucker(points, tolerance);
+
+    if (isPolygon && simplified.length < 3) return points;
+    if (!isPolygon && simplified.length < 2) return points;
+    return simplified;
+  }
+
+  List<LatLng> _douglasPeucker(List<LatLng> points, double epsilon) {
+    if (points.length < 3) return points;
+
+    var maxDist = 0.0;
+    var index = 0;
+    final start = points.first;
+    final end = points.last;
+
+    for (int i = 1; i < points.length - 1; i++) {
+      final dist = _perpendicularDistance(points[i], start, end);
+      if (dist > maxDist) {
+        maxDist = dist;
+        index = i;
+      }
     }
 
-    final last = points.last;
-    if (sampled.isEmpty || sampled.last != last) {
-      sampled.add(last);
+    if (maxDist <= epsilon) return [start, end];
+
+    final left = _douglasPeucker(points.sublist(0, index + 1), epsilon);
+    final right = _douglasPeucker(points.sublist(index), epsilon);
+    return [...left.sublist(0, left.length - 1), ...right];
+  }
+
+  double _perpendicularDistance(
+    LatLng point,
+    LatLng lineStart,
+    LatLng lineEnd,
+  ) {
+    final dx = lineEnd.longitude - lineStart.longitude;
+    final dy = lineEnd.latitude - lineStart.latitude;
+
+    if (dx == 0 && dy == 0) {
+      final ddx = point.longitude - lineStart.longitude;
+      final ddy = point.latitude - lineStart.latitude;
+      return math.sqrt(ddx * ddx + ddy * ddy);
     }
 
-    if (isPolygon && sampled.length < 3) return points;
-    if (!isPolygon && sampled.length < 2) return points;
-    return sampled;
+    final numerator =
+        (dy * point.longitude - dx * point.latitude +
+                lineEnd.longitude * lineStart.latitude -
+                lineEnd.latitude * lineStart.longitude)
+            .abs();
+    final denominator = math.sqrt(dx * dx + dy * dy);
+    return numerator / denominator;
   }
 
   List<LatLng> _toLatLngs(List raw) {
@@ -4196,84 +4036,6 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       return 'no_liberado';
     }
     return compact;
-  }
-
-  double _bucketSizeForZoom(double zoom) {
-    if (zoom >= 17) return 0.0025;
-    if (zoom >= 15) return 0.004;
-    if (zoom >= 13) return 0.008;
-    if (zoom >= 11) return 0.015;
-    if (zoom >= 9) return 0.03;
-    return 0.06;
-  }
-
-  int _estimateGroups(List<Predio> predios, double zoom) {
-    final bucket = _bucketSizeForZoom(zoom);
-    if (bucket <= 0) return predios.length;
-    final cells = <String, _HeatBucket>{};
-    for (final p in predios) {
-      LatLng? pos;
-      if (p.geometry != null) {
-        final polys = _extractPolygons(p.geometry!);
-        if (polys.isNotEmpty && polys.first.isNotEmpty) {
-          pos = _centroid(polys.first);
-        }
-      }
-      pos ??= (p.latitud != null && p.longitud != null)
-          ? LatLng(p.latitud!, p.longitud!)
-          : null;
-      if (pos == null) continue;
-      final latIdx = (pos.latitude / bucket).floor();
-      final lngIdx = (pos.longitude / bucket).floor();
-      final key = '$latIdx:$lngIdx';
-      final existing = cells[key];
-      if (existing == null) {
-        cells[key] = _HeatBucket(center: pos, count: 1);
-      } else {
-        final total = existing.count + 1;
-        existing.center = LatLng(
-          ((existing.center.latitude * existing.count) + pos.latitude) / total,
-          ((existing.center.longitude * existing.count) + pos.longitude) /
-              total,
-        );
-        existing.count = total;
-      }
-    }
-    return _mergeOverlappingBuckets(cells.values.toList(), bucket).length;
-  }
-
-  String _zoomLabel(double zoom) {
-    if (zoom >= 14) return 'cercana';
-    if (zoom >= 11) return 'media';
-    return 'lejana';
-  }
-
-  Color _heatColor(_HeatBucket bucket) {
-    // Color based on liberation status ratio
-    // Green if mostly liberados, Red if mostly no liberados, Yellow/Orange if mixed
-    if (bucket.count == 0) return const Color(0xFF7CB342); // default green
-    
-    final liberadoRatio = bucket.liberados / bucket.count;
-    final noLiberadoRatio = bucket.noLiberados / bucket.count;
-    
-    // If predominantly liberated (>66%)
-    if (liberadoRatio > 0.66) {
-      return const Color(0xFF2E7D32); // strong green
-    }
-    
-    // If predominantly not liberated (>66%)
-    if (noLiberadoRatio > 0.66) {
-      return const Color(0xFFD32F2F); // strong red
-    }
-    
-    // Mixed clusters: use yellow/orange based on slight predominance
-    if (bucket.liberados > bucket.noLiberados) {
-      return const Color(0xFFFBC02D); // yellow (slightly more liberated)
-    } else if (bucket.noLiberados > bucket.liberados) {
-      return const Color(0xFFF57C00); // orange (slightly more not liberated)
-    }
-    
-    return const Color(0xFFFBC02D); // balanced: yellow
   }
 
   // Mapa base "Estándar": stripmap (World_Street_Map) con nombres de calles,
