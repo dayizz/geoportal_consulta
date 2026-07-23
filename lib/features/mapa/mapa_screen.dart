@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui show Path, TextDirection;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -152,6 +153,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   double _currentZoom = _defaultZoom;
   int _zoomRenderStep = (_defaultZoom * 2).round();
   Timer? _zoomDebounce;
+  final ValueNotifier<double> _mapRotation = ValueNotifier<double>(0);
+  StreamSubscription<MapEvent>? _mapEventSub;
 
   // Caches para optimización
   late GeometryCache _geometryCache;
@@ -174,10 +177,17 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       duration: const Duration(milliseconds: 700),
     );
     _lastRefresh = DateTime.now();
+    // Mantiene la rosa de los vientos sincronizada con el giro del mapa
+    // (Ctrl+arrastrar o botón central) sin reconstruir toda la pantalla.
+    _mapEventSub = _mapCtrl.mapEventStream.listen((_) {
+      _mapRotation.value = _mapCtrl.camera.rotation;
+    });
   }
 
   @override
   void dispose() {
+    _mapEventSub?.cancel();
+    _mapRotation.dispose();
     _zoomDebounce?.cancel();
     _spinCtrl.dispose();
     _geometryCache.clear();
@@ -236,6 +246,19 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
               prediosAsync.valueOrNull ?? [],
               municipiosAsync.valueOrNull ?? const [],
               importedGeoJsonAsync.valueOrNull ?? const [],
+            ),
+          ),
+
+          // ─── Rosa de los vientos ─────────────────────────────────────────
+          Positioned(
+            top: 130,
+            right: 16,
+            child: ValueListenableBuilder<double>(
+              valueListenable: _mapRotation,
+              builder: (context, rotation, _) => _CompassRose(
+                rotationDegrees: rotation,
+                onTap: () => _mapCtrl.rotate(0),
+              ),
             ),
           ),
 
@@ -4296,4 +4319,111 @@ class _ColorModeToggle extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Rosa de los vientos flotante (sin contenedor/fondo visible) que indica el
+/// norte real conforme el mapa se rota (Ctrl+arrastrar o botón central).
+/// Un tap la regresa a 0° (norte arriba).
+class _CompassRose extends StatelessWidget {
+  final double rotationDegrees;
+  final VoidCallback? onTap;
+
+  const _CompassRose({required this.rotationDegrees, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: CustomPaint(
+          painter: _CompassRosePainter(rotationDegrees: rotationDegrees),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompassRosePainter extends CustomPainter {
+  final double rotationDegrees;
+
+  _CompassRosePainter({required this.rotationDegrees});
+
+  static const _darkColor = Color(0xFF1B4332);
+  static const _lightColor = Colors.white;
+  static const _northColor = Color(0xFFD32F2F);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.rotate(-rotationDegrees * (math.pi / 180));
+
+    final outerLong = size.shortestSide * 0.5;
+    final outerShort = size.shortestSide * 0.27;
+    final innerValley = size.shortestSide * 0.10;
+
+    Offset pointAt(double angle, double radius) =>
+        Offset(radius * math.cos(angle), radius * math.sin(angle));
+
+    for (var i = 0; i < 8; i++) {
+      final isCardinal = i.isEven;
+      final isNorth = i == 0;
+      final angle = i * (math.pi / 4) - math.pi / 2;
+      final prevAngle = angle - math.pi / 4;
+      final nextAngle = angle + math.pi / 4;
+
+      final tip = pointAt(angle, isCardinal ? outerLong : outerShort);
+      final valleyBefore = pointAt((angle + prevAngle) / 2, innerValley);
+      final valleyAfter = pointAt((angle + nextAngle) / 2, innerValley);
+
+      final leftColor = isNorth
+          ? _northColor
+          : (isCardinal ? _darkColor : _lightColor);
+      final rightColor = isNorth
+          ? _northColor.withOpacity(0.65)
+          : (isCardinal ? _lightColor : _darkColor);
+
+      canvas.drawPath(
+        ui.Path()
+          ..moveTo(0, 0)
+          ..lineTo(valleyBefore.dx, valleyBefore.dy)
+          ..lineTo(tip.dx, tip.dy)
+          ..close(),
+        Paint()..color = leftColor,
+      );
+      canvas.drawPath(
+        ui.Path()
+          ..moveTo(0, 0)
+          ..lineTo(tip.dx, tip.dy)
+          ..lineTo(valleyAfter.dx, valleyAfter.dy)
+          ..close(),
+        Paint()..color = rightColor,
+      );
+    }
+
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: 'N',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          shadows: [Shadow(color: Colors.black45, blurRadius: 2)],
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    textPainter.paint(
+      canvas,
+      Offset(-textPainter.width / 2, -outerLong + 4),
+    );
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CompassRosePainter oldDelegate) =>
+      oldDelegate.rotationDegrees != rotationDegrees;
 }
