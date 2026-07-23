@@ -59,18 +59,6 @@ Map<String, int> countByFieldUnified({
 }
 // --- Fin utilidades puras ---
 
-// Colores por estado de gestión
-Color _colorEstado(Predio p) {
-  final estatus = p.estatus?.trim().toLowerCase();
-  if (estatus == 'liberado') return const Color(0xFFCDDC39); // verde lima
-  if (estatus == 'no liberado') return const Color(0xFFD32F2F); // rojo
-  if (p.negociacion) return const Color(0xFF1B5E20); // verde oscuro
-  if (p.cop) return const Color(0xFFCDDC39); // verde lima
-  if (p.levantamiento) return const Color(0xFFF57F17); // ámbar
-  if (p.identificacion) return const Color(0xFF1565C0); // azul
-  return const Color(0xFF757575); // gris
-}
-
 // Colores por tipo de propiedad
 Color _colorTipo(Predio p) {
   switch (p.tipoPropiedad.toUpperCase()) {
@@ -142,6 +130,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _mostrarNucleosAgrarios = true;
   bool _mostrarEtiquetas = false;
   bool _mostrarPks = false;
+  double _predioFillOpacity = 0.35;
   Set<String> _selectedTipoProyectos = {};
   Set<String> _selectedEstatus = {};
   Set<String> _selectedEjidos = {};
@@ -273,7 +262,13 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           Positioned(
             top: 122,
             left: 16,
-            child: _buildLayersDropdown(),
+            child: Row(
+              children: [
+                _buildLayersDropdown(),
+                const SizedBox(width: 8),
+                _buildOpacityButton(),
+              ],
+            ),
           ),
 
           if ((importedGeoJsonAsync.valueOrNull?.isNotEmpty ?? false))
@@ -437,40 +432,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
     final drawnPolylineKeys = <String>{};
     final showMunicipalBorders = _currentZoom >= 10;
 
-    // Polígonos y límites
-    bool shouldDrawPolygons() => _currentZoom >= 10;
-
     for (final p in visiblePredios) {
-        final estatus = p.estatus?.trim().toLowerCase();
-        final color = (estatus == 'liberado')
-          ? const Color(0xFFCDDC39)
-          : (_colorMode == _ColorMode.estado
-            ? _colorEstado(p)
-            : _colorTipo(p));
+        final color = _colorMode == _ColorMode.estado
+          ? _colorEstado(p)
+          : _colorTipo(p);
 
       final geo = p.geometry;
       LatLng? markerPoint;
 
       if (geo != null) {
         final polys = _extractPolygons(geo);
-        if (shouldDrawPolygons()) {
-          for (final coords in polys) {
-            if (coords.isNotEmpty) {
-              final drawCoords = _simplifyGeometryForZoom(
-                coords,
-                _currentZoom,
-                isPolygon: true,
-              );
-              if (drawCoords.length < 3) continue;
-              final polygonKey = 'predio:${_lineKey(drawCoords)}';
-              if (!drawnPolygonKeys.add(polygonKey)) continue;
-              polygons.add(Polygon(
-                points: drawCoords,
-                color: color.withOpacity(0.35),
-                borderColor: color.withOpacity(0.95),
-                borderStrokeWidth: 3.6,
-              ));
-            }
+        for (final coords in polys) {
+          if (coords.isNotEmpty) {
+            final drawCoords = _simplifyGeometryForZoom(
+              coords,
+              _currentZoom,
+              isPolygon: true,
+            );
+            if (drawCoords.length < 3) continue;
+            final polygonKey = 'predio:${_lineKey(drawCoords)}';
+            if (!drawnPolygonKeys.add(polygonKey)) continue;
+            polygons.add(Polygon(
+              points: drawCoords,
+              color: color.withOpacity(_predioFillOpacity),
+              borderColor: color.withOpacity(0.95),
+              borderStrokeWidth: 3.6,
+            ));
           }
         }
 
@@ -501,15 +488,12 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       final sourceAsset =
           (feature.properties['__source_asset'] ?? '').toString().toLowerCase();
       final isPkAsset = sourceAsset.endsWith('pks.geojson');
-      final estatus = feature.estatus?.trim().toLowerCase();
       final isNucleoAgrario = _isNucleoAgrarioFeature(feature);
         final fillColor = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? const Color(0xFF1976D2)
           : (isNucleoAgrario
               ? const Color(0xFF4FC3F7)
-              : (estatus == 'liberado'
-                  ? const Color(0xFFCDDC39)
-                  : const Color(0xFFD32F2F)));
+              : _colorEstadoImportado(feature.properties));
         final borderColor = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? const Color(0xFF1976D2)
           : (isNucleoAgrario
@@ -519,7 +503,9 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
                   : fillColor.withOpacity(0.95)));
         final polygonOpacity = (isEnvelopeFeature || isTmqEnvelopeFeature)
           ? (_currentZoom >= 12 ? 0.46 : 0.34)
-          : (_currentZoom >= 12 ? 0.35 : 0.18);
+          : (isNucleoAgrario
+              ? (_currentZoom >= 12 ? 0.35 : 0.18)
+              : _predioFillOpacity);
       final borderWidth = feature.esEstacion
           ? (_currentZoom >= 11 ? 3.4 : 2.2)
           : ((isEnvelopeFeature || isTmqEnvelopeFeature)
@@ -713,7 +699,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
           PolygonLayer(polygons: municipalPolygons),
         if (showMunicipalBorders && municipalPolylines.isNotEmpty)
           PolylineLayer(polylines: municipalPolylines),
-        if (showMunicipalBorders && polygons.isNotEmpty)
+        if (polygons.isNotEmpty)
           PolygonLayer(polygons: polygons),
         // Capas importadas SIEMPRE visibles
         if (importedPolygons.isNotEmpty)
@@ -2104,6 +2090,7 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         ? [
             ('Liberado', const Color(0xFF2E7D32)),
             ('No liberado', const Color(0xFFD32F2F)),
+            ('En proceso / Negociación', const Color(0xFFFBC02D)),
             ('Sin estatus', const Color(0xFF757575)),
           ]
         : [
@@ -3956,6 +3943,32 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         _isNegociacionActive(feature.properties);
   }
 
+  // Colores por estado de gestión: Liberado=verde, No liberado=rojo,
+  // En proceso/Negociación=amarillo, Sin estatus=gris. Reutiliza la misma
+  // clasificación que ya usan los chips de filtro para que el color en el
+  // mapa siempre coincida con la categoría mostrada en la UI.
+  Color _colorForEstatusBucket(String bucket) {
+    switch (bucket) {
+      case 'liberado':
+        return const Color(0xFF2E7D32); // verde
+      case 'no_liberado':
+        return const Color(0xFFD32F2F); // rojo
+      case 'en_negociacion':
+      case 'sin_avance':
+        return const Color(0xFFFBC02D); // amarillo: en proceso / negociación
+      default:
+        return const Color(0xFF757575); // gris: sin estatus
+    }
+  }
+
+  Color _colorEstado(Predio p) => _colorForEstatusBucket(
+      _normalizeEstatusFilterLabel(_estatusFilterLabelFromPredio(p)));
+
+  Color _colorEstadoImportado(Map<String, dynamic> properties) =>
+      _colorForEstatusBucket(
+        _normalizeEstatusFilterLabel(_estatusFilterLabelFromProperties(properties)),
+      );
+
   String _estatusFilterLabelFromPredio(Predio p) {
     if (_isLiberado(p)) return 'Liberado';
 
@@ -4137,6 +4150,56 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
         onSelected: (value) {
           setState(() => _baseLayer = value);
         },
+      ),
+    );
+  }
+
+  Widget _buildOpacityButton() {
+    return Material(
+      color: Colors.white,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(8),
+      child: PopupMenuButton<void>(
+        tooltip: 'Opacidad de predios',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        color: Colors.white,
+        icon: const Icon(Icons.opacity_rounded, color: Color(0xFF555555), size: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        itemBuilder: (context) => [
+          PopupMenuItem<void>(
+            enabled: false,
+            child: StatefulBuilder(
+              builder: (context, setMenuState) {
+                return SizedBox(
+                  width: 220,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Opacidad de predios: ${(_predioFillOpacity * 100).round()}%',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Slider(
+                        value: _predioFillOpacity,
+                        min: 0.05,
+                        max: 1.0,
+                        divisions: 19,
+                        onChanged: (value) {
+                          setMenuState(() {});
+                          setState(() => _predioFillOpacity = value);
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
