@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -131,6 +132,8 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
   bool _mostrarEtiquetas = false;
   bool _mostrarPks = false;
   double _predioFillOpacity = 0.35;
+  bool _isRotatingViaMiddleMouse = false;
+  double? _middleMouseLastDx;
   Set<String> _selectedTipoProyectos = {};
   Set<String> _selectedEstatus = {};
   Set<String> _selectedEjidos = {};
@@ -647,76 +650,103 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
       }
     }
 
-    return FlutterMap(
-      mapController: _mapCtrl,
-      options: MapOptions(
-        initialCenter: _defaultCenter,
-        initialZoom: _defaultZoom,
-        onTap: (_, point) {
-          final tappedPredio = _findPredioAtPoint(point, filteredPredios);
-          final nonEnvolventes =
-              filteredImportedGeoJson.where((f) => !_isEnvelopeFeature(f)).toList();
-          final tappedImported = _findImportedFeatureAtPoint(point, nonEnvolventes);
-          setState(() {
-            // Muestra solo una ficha: prioriza la última ficha implementada
-            // (GeoJSON importado) cuando ambos elementos se traslapan.
-            if (tappedImported != null) {
-              _selectedImportedFeature = tappedImported;
-              _selectedPredio = null;
-            } else {
-              _selectedPredio = tappedPredio;
-              _selectedImportedFeature = null;
-            }
-          });
-        },
-        onPositionChanged: (position, hasGesture) {
-          final nextZoom = position.zoom ?? _currentZoom;
-          final nextStep = (nextZoom * 2).round();
-          if (nextStep == _zoomRenderStep) return;
-          // Se posterga el recálculo de polígonos/marcadores mientras el
-          // usuario sigue haciendo zoom o desplazando el mapa, para no
-          // bloquear el hilo de UI en cada paso intermedio del gesto y
-          // evitar que la carga de tiles se vea entrecortada/"rota".
-          _zoomDebounce?.cancel();
-          _zoomDebounce = Timer(const Duration(milliseconds: 120), () {
-            if (!mounted) return;
+    // Rotación con botón central del mouse sostenido: arrastrar horizontalmente
+    // mientras se mantiene presionado el scroll/botón central gira el mapa.
+    // La rotación con Ctrl+arrastrar (mouse o touchpad) ya viene incluida por
+    // defecto en flutter_map (InteractiveFlag.rotate + cursorKeyboardRotationOptions).
+    return Listener(
+      onPointerDown: (event) {
+        if (event.buttons == kMiddleMouseButton) {
+          _isRotatingViaMiddleMouse = true;
+          _middleMouseLastDx = event.position.dx;
+        }
+      },
+      onPointerMove: (event) {
+        if (!_isRotatingViaMiddleMouse || _middleMouseLastDx == null) return;
+        final dx = event.position.dx - _middleMouseLastDx!;
+        _middleMouseLastDx = event.position.dx;
+        _mapCtrl.rotate(_mapCtrl.camera.rotation + dx * 0.3);
+      },
+      onPointerUp: (_) {
+        _isRotatingViaMiddleMouse = false;
+        _middleMouseLastDx = null;
+      },
+      onPointerCancel: (_) {
+        _isRotatingViaMiddleMouse = false;
+        _middleMouseLastDx = null;
+      },
+      child: FlutterMap(
+        mapController: _mapCtrl,
+        options: MapOptions(
+          initialCenter: _defaultCenter,
+          initialZoom: _defaultZoom,
+          onTap: (_, point) {
+            final tappedPredio = _findPredioAtPoint(point, filteredPredios);
+            final nonEnvolventes = filteredImportedGeoJson
+                .where((f) => !_isEnvelopeFeature(f))
+                .toList();
+            final tappedImported =
+                _findImportedFeatureAtPoint(point, nonEnvolventes);
             setState(() {
-              _currentZoom = nextZoom;
-              _zoomRenderStep = nextStep;
+              // Muestra solo una ficha: prioriza la última ficha implementada
+              // (GeoJSON importado) cuando ambos elementos se traslapan.
+              if (tappedImported != null) {
+                _selectedImportedFeature = tappedImported;
+                _selectedPredio = null;
+              } else {
+                _selectedPredio = tappedPredio;
+                _selectedImportedFeature = null;
+              }
             });
-          });
-        },
+          },
+          onPositionChanged: (position, hasGesture) {
+            final nextZoom = position.zoom ?? _currentZoom;
+            final nextStep = (nextZoom * 2).round();
+            if (nextStep == _zoomRenderStep) return;
+            // Se posterga el recálculo de polígonos/marcadores mientras el
+            // usuario sigue haciendo zoom o desplazando el mapa, para no
+            // bloquear el hilo de UI en cada paso intermedio del gesto y
+            // evitar que la carga de tiles se vea entrecortada/"rota".
+            _zoomDebounce?.cancel();
+            _zoomDebounce = Timer(const Duration(milliseconds: 120), () {
+              if (!mounted) return;
+              setState(() {
+                _currentZoom = nextZoom;
+                _zoomRenderStep = nextStep;
+              });
+            });
+          },
+        ),
+        children: [
+          ..._buildBaseLayers(),
+          // Nivel 10-14: Ciudades, áreas metropolitanas, rutas, avenidas principales y nombres
+          // Los núcleos agrarios deben quedar por debajo del resto de capas vectoriales.
+          if (nucleoPolygons.isNotEmpty)
+            PolygonLayer(polygons: nucleoPolygons),
+          if (nucleoPolylines.isNotEmpty)
+            PolylineLayer(polylines: nucleoPolylines),
+          if (showMunicipalBorders && municipalPolygons.isNotEmpty)
+            PolygonLayer(polygons: municipalPolygons),
+          if (showMunicipalBorders && municipalPolylines.isNotEmpty)
+            PolylineLayer(polylines: municipalPolylines),
+          if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+          // Capas importadas SIEMPRE visibles
+          if (importedPolygons.isNotEmpty)
+            PolygonLayer(polygons: importedPolygons),
+          if (importedPolylines.isNotEmpty)
+            PolylineLayer(polylines: importedPolylines),
+          if (envolventePolygons.isNotEmpty)
+            PolygonLayer(polygons: envolventePolygons),
+          if (envolventePolylines.isNotEmpty)
+            PolylineLayer(polylines: envolventePolylines),
+          if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
+            MarkerLayer(markers: importedPkMarkers),
+          if (_mostrarEtiquetas && sedatuLabelMarkers.isNotEmpty)
+            MarkerLayer(markers: sedatuLabelMarkers),
+          if (pkFilterEnabled && _mostrarPks && selectedFeaturePin.isNotEmpty)
+            MarkerLayer(markers: selectedFeaturePin),
+        ],
       ),
-      children: [
-        ..._buildBaseLayers(),
-        // Nivel 10-14: Ciudades, áreas metropolitanas, rutas, avenidas principales y nombres
-        // Los núcleos agrarios deben quedar por debajo del resto de capas vectoriales.
-        if (nucleoPolygons.isNotEmpty)
-          PolygonLayer(polygons: nucleoPolygons),
-        if (nucleoPolylines.isNotEmpty)
-          PolylineLayer(polylines: nucleoPolylines),
-        if (showMunicipalBorders && municipalPolygons.isNotEmpty)
-          PolygonLayer(polygons: municipalPolygons),
-        if (showMunicipalBorders && municipalPolylines.isNotEmpty)
-          PolylineLayer(polylines: municipalPolylines),
-        if (polygons.isNotEmpty)
-          PolygonLayer(polygons: polygons),
-        // Capas importadas SIEMPRE visibles
-        if (importedPolygons.isNotEmpty)
-          PolygonLayer(polygons: importedPolygons),
-        if (importedPolylines.isNotEmpty)
-          PolylineLayer(polylines: importedPolylines),
-        if (envolventePolygons.isNotEmpty)
-          PolygonLayer(polygons: envolventePolygons),
-        if (envolventePolylines.isNotEmpty)
-          PolylineLayer(polylines: envolventePolylines),
-        if (pkFilterEnabled && _mostrarPks && importedPkMarkers.isNotEmpty)
-          MarkerLayer(markers: importedPkMarkers),
-        if (_mostrarEtiquetas && sedatuLabelMarkers.isNotEmpty)
-          MarkerLayer(markers: sedatuLabelMarkers),
-        if (pkFilterEnabled && _mostrarPks && selectedFeaturePin.isNotEmpty)
-          MarkerLayer(markers: selectedFeaturePin),
-      ],
     );
   }
 
