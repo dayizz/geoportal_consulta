@@ -63,14 +63,14 @@ Map<String, int> countByFieldUnified({
 
 // Colores por tipo de propiedad
 Color _colorTipo(Predio p) {
-  switch (p.tipoPropiedad.toUpperCase()) {
-    case 'SOCIAL':
-      return const Color(0xFF7E57C2);
-    case 'PRIVADA':
-      return const Color(0xFFF57C00);
-    default:
-      return const Color(0xFF6D6D6D);
-  }
+  final tipo = p.tipoPropiedad.toUpperCase().trim();
+  if (tipo.contains('DOMINIO')) return const Color(0xFF26A69A); // verde agua
+  if (tipo.contains('GUBERNAMENT')) return const Color(0xFF7B1E3A); // rojo vino
+  if (tipo.contains('MUNICIPAL')) return const Color(0xFFF48FB1); // rosa claro
+  if (tipo.contains('ESTATAL')) return const Color(0xFFA1887F); // café claro
+  if (tipo.contains('SOCIAL')) return const Color(0xFF7E57C2); // morado
+  if (tipo.contains('PRIVAD')) return const Color(0xFFF57C00); // naranja
+  return const Color(0xFF6D6D6D); // gris: sin tipo
 }
 
 enum _ColorMode { estado, tipo }
@@ -2150,6 +2150,10 @@ class _MapaConsultaScreenState extends ConsumerState<MapaConsultaScreen>
             ('Sin tipo', const Color(0xFF6D6D6D)),
             ('Social', const Color(0xFF7E57C2)),
             ('Privada', const Color(0xFFF57C00)),
+            ('Dominio pleno', const Color(0xFF26A69A)),
+            ('Gubernamental', const Color(0xFF7B1E3A)),
+            ('Municipal', const Color(0xFFF48FB1)),
+            ('Estatal', const Color(0xFFA1887F)),
           ];
 
     return Container(
